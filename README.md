@@ -1,0 +1,51 @@
+# Student Messenger
+
+Web chat realtime như Messenger ở mức sinh viên, tách rõ backend và frontend nhưng vẫn deploy miễn phí dễ nhất bằng Vercel.
+
+## Stack
+
+- Frontend: Next.js App Router, React, CSS thuần.
+- Backend: Next.js API Routes trong thư mục `app/api`.
+- Auth, database, realtime: Supabase free tier.
+- Deploy: Vercel free tier.
+
+## Chức năng
+
+- Đăng ký, đăng nhập bằng email/password.
+- Chat 1:1.
+- Chat nhóm N-N, mọi thành viên đều nhắn được.
+- Kênh 1:N, chỉ admin được gửi tin nhắn.
+- Tìm người dùng theo email hoặc tên hiển thị.
+- Tạo nhóm/kênh và thêm thành viên.
+- Tin nhắn realtime qua Supabase Realtime.
+- Cập nhật tên hiển thị và trạng thái.
+
+## Chạy local
+
+1. Tạo project Supabase mới.
+2. Vào Supabase SQL Editor, chạy toàn bộ file `supabase/schema.sql`.
+3. Vào Authentication > Providers > Email, có thể tắt Confirm email để demo sinh viên nhanh hơn.
+4. Copy `.env.example` thành `.env.local` và điền:
+
+```bash
+NEXT_PUBLIC_SUPABASE_URL=...
+NEXT_PUBLIC_SUPABASE_ANON_KEY=...
+```
+
+5. Cài và chạy:
+
+```bash
+npm install
+npm run dev
+```
+
+## Deploy Vercel
+
+1. Push source lên GitHub.
+2. Import repo vào Vercel.
+3. Thêm 2 biến môi trường:
+   - `NEXT_PUBLIC_SUPABASE_URL`
+   - `NEXT_PUBLIC_SUPABASE_ANON_KEY`
+4. Deploy.
+
+Không cần server riêng, không cần trả phí nếu dùng trong giới hạn free tier của Vercel và Supabase.
