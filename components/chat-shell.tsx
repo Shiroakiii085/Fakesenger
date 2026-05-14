@@ -117,6 +117,10 @@ function dedupeMessages(messages: Message[]) {
   });
 }
 
+function sortRoomsByRecent(rooms: Room[]) {
+  return [...rooms].sort((first, second) => new Date(second.updated_at).getTime() - new Date(first.updated_at).getTime());
+}
+
 export function ChatShell() {
   const supabase = useMemo(() => createBrowserSupabase(), []);
   const isSupabaseConfigured = hasSupabaseBrowserEnv();
@@ -150,6 +154,7 @@ export function ChatShell() {
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
   const messagesLoadIdRef = useRef(0);
   const sessionRef = useRef<Session | null>(null);
+  const roomsRef = useRef<Room[]>([]);
   const activeRoomRef = useRef<Room | null>(null);
   const bootstrappedUserIdRef = useRef<string | null>(null);
   const isSigningUpRef = useRef(false);
@@ -170,6 +175,10 @@ export function ChatShell() {
     () => new Set(activeRoom?.members.map((member) => member.user_id) ?? []),
     [activeRoom?.members]
   );
+
+  useEffect(() => {
+    roomsRef.current = rooms;
+  }, [rooms]);
 
   useEffect(() => {
     activeRoomRef.current = activeRoom;
@@ -227,7 +236,10 @@ export function ChatShell() {
     if (!sessionRef.current?.access_token) return;
     const data = await authFetch<{ rooms: Room[] }>("/api/rooms");
     setRooms(data.rooms);
-    setActiveRoomId((current) => current ?? data.rooms[0]?.id ?? null);
+    setActiveRoomId((current) => {
+      if (current && data.rooms.some((room) => room.id === current)) return current;
+      return data.rooms[0]?.id ?? null;
+    });
   }, [authFetch]);
 
   const bootstrapProfile = useCallback(
@@ -347,6 +359,52 @@ export function ChatShell() {
       if (!shouldIgnoreBackgroundError(error)) setNotice(error.message);
     });
   }, [loadRooms, profile?.id]);
+
+  useEffect(() => {
+    if (!isSupabaseConfigured || !profile?.id) return;
+
+    let reloadTimer: number | null = null;
+    const refreshRoomsSoon = () => {
+      if (reloadTimer) window.clearTimeout(reloadTimer);
+      reloadTimer = window.setTimeout(() => {
+        loadRooms().catch((error) => {
+          if (!shouldIgnoreBackgroundError(error)) setNotice(error.message);
+        });
+      }, 120);
+    };
+
+    const membershipChannel = supabase
+      .channel(`room-list-members-${profile.id}`)
+      .on(
+        "postgres_changes",
+        { event: "INSERT", schema: "public", table: "room_members", filter: `user_id=eq.${profile.id}` },
+        refreshRoomsSoon
+      )
+      .subscribe();
+
+    const messagesChannel = supabase
+      .channel(`room-list-messages-${profile.id}`)
+      .on("postgres_changes", { event: "INSERT", schema: "public", table: "messages" }, (payload) => {
+        const row = payload.new as Pick<Message, "room_id" | "created_at">;
+        const roomExists = roomsRef.current.some((room) => room.id === row.room_id);
+
+        if (!roomExists) {
+          refreshRoomsSoon();
+          return;
+        }
+
+        setRooms((current) =>
+          sortRoomsByRecent(current.map((room) => (room.id === row.room_id ? { ...room, updated_at: row.created_at } : room)))
+        );
+      })
+      .subscribe();
+
+    return () => {
+      if (reloadTimer) window.clearTimeout(reloadTimer);
+      supabase.removeChannel(membershipChannel);
+      supabase.removeChannel(messagesChannel);
+    };
+  }, [isSupabaseConfigured, loadRooms, profile?.id, supabase]);
 
   useEffect(() => {
     if (!isSupabaseConfigured) return;
@@ -574,7 +632,9 @@ export function ChatShell() {
       });
       setMessages((current) => upsertServerMessage(current, data.message));
       setRooms((current) =>
-        current.map((room) => (room.id === activeRoom.id ? { ...room, updated_at: data.message.created_at } : room))
+        sortRoomsByRecent(
+          current.map((room) => (room.id === activeRoom.id ? { ...room, updated_at: data.message.created_at } : room))
+        )
       );
     } catch (error) {
       setMessages((current) => current.filter((message) => message.id !== pendingId));
