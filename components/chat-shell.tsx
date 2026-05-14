@@ -94,6 +94,7 @@ export function ChatShell() {
   const [newRoomDescription, setNewRoomDescription] = useState("");
   const [selectedUsers, setSelectedUsers] = useState<Profile[]>([]);
   const [profileDraft, setProfileDraft] = useState({ displayName: "", status: "" });
+  const [isAccountMenuOpen, setIsAccountMenuOpen] = useState(false);
   const [isDetailsOpen, setIsDetailsOpen] = useState(false);
   const [memberSearchQuery, setMemberSearchQuery] = useState("");
   const [memberSearchResults, setMemberSearchResults] = useState<Profile[]>([]);
@@ -232,6 +233,7 @@ export function ChatShell() {
         setRooms([]);
         setMessages([]);
         setActiveRoomId(null);
+        setIsAccountMenuOpen(false);
       }
     });
 
@@ -443,6 +445,7 @@ export function ChatShell() {
         }
       });
       setProfile(data.profile);
+      setIsAccountMenuOpen(false);
       setNotice("Đã lưu hồ sơ.");
     } catch (error) {
       setNotice(error instanceof Error ? error.message : "Không thể lưu hồ sơ.");
@@ -587,30 +590,42 @@ export function ChatShell() {
             <strong>{profile.display_name}</strong>
             <span>{profile.status || "online"}</span>
           </div>
-          <button className="icon-button" title="Đăng xuất" onClick={() => supabase.auth.signOut()}>
-            <LogOut size={18} />
+          <button
+            className={`icon-button ${isAccountMenuOpen ? "dark" : ""}`}
+            title="Tài khoản"
+            onClick={() => setIsAccountMenuOpen((open) => !open)}
+          >
+            <Settings size={18} />
           </button>
         </div>
 
-        <div className="profile-editor">
-          <div className="field-row">
-            <Settings size={16} />
-            <span>Hồ sơ</span>
+        {isAccountMenuOpen && (
+          <div className="account-menu">
+            <div className="profile-editor">
+              <div className="field-row">
+                <Settings size={16} />
+                <span>Hồ sơ</span>
+              </div>
+              <input
+                value={profileDraft.displayName}
+                onChange={(event) => setProfileDraft((current) => ({ ...current, displayName: event.target.value }))}
+                placeholder="Tên hiển thị"
+              />
+              <input
+                value={profileDraft.status}
+                onChange={(event) => setProfileDraft((current) => ({ ...current, status: event.target.value }))}
+                placeholder="Trạng thái"
+              />
+              <button type="button" onClick={saveProfile}>
+                Lưu hồ sơ
+              </button>
+              <button className="profile-logout" type="button" onClick={() => supabase.auth.signOut()}>
+                <LogOut size={17} />
+                Đăng xuất
+              </button>
+            </div>
           </div>
-          <input
-            value={profileDraft.displayName}
-            onChange={(event) => setProfileDraft((current) => ({ ...current, displayName: event.target.value }))}
-            placeholder="Tên hiển thị"
-          />
-          <input
-            value={profileDraft.status}
-            onChange={(event) => setProfileDraft((current) => ({ ...current, status: event.target.value }))}
-            placeholder="Trạng thái"
-          />
-          <button type="button" onClick={saveProfile}>
-            Lưu hồ sơ
-          </button>
-        </div>
+        )}
 
         <div className="search-box">
           <Search size={17} />
