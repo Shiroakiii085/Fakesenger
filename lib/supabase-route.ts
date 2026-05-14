@@ -54,6 +54,14 @@ export function errorJson(error: unknown, status = 400) {
     return error;
   }
 
+  if (error && typeof error === "object" && "message" in error) {
+    const message = String((error as { message: unknown }).message);
+    const details = "details" in error ? String((error as { details?: unknown }).details ?? "") : "";
+    const hint = "hint" in error ? String((error as { hint?: unknown }).hint ?? "") : "";
+
+    return json({ error: [message, details, hint].filter(Boolean).join(" ") }, { status });
+  }
+
   const message = error instanceof Error ? error.message : "Unexpected error";
   return json({ error: message }, { status });
 }

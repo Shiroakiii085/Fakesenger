@@ -179,7 +179,7 @@ drop policy if exists "members can read rooms" on public.rooms;
 create policy "members can read rooms"
 on public.rooms for select
 to authenticated
-using (public.is_room_member(id, auth.uid()));
+using (created_by = auth.uid() or public.is_room_member(id, auth.uid()));
 
 drop policy if exists "users can create rooms" on public.rooms;
 create policy "users can create rooms"

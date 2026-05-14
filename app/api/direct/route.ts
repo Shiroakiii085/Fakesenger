@@ -37,7 +37,10 @@ export async function POST(request: Request) {
     ];
 
     const memberInsert = await supabase.from("room_members").insert(members);
-    if (memberInsert.error) throw memberInsert.error;
+    if (memberInsert.error) {
+      await supabase.from("rooms").delete().eq("id", roomInsert.data.id);
+      throw memberInsert.error;
+    }
 
     return json({ room: roomInsert.data }, { status: 201 });
   } catch (error) {
