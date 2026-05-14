@@ -1,5 +1,16 @@
 import { errorJson, getRouteContext, json } from "@/lib/supabase-route";
 
+function isMissingRequestsTable(error: unknown) {
+  if (!error || typeof error !== "object") return false;
+  const value = error as { code?: unknown; message?: unknown };
+  return (
+    value.code === "PGRST205" ||
+    String(value.message ?? "")
+      .toLowerCase()
+      .includes("member_requests")
+  );
+}
+
 export async function GET(request: Request, context: { params: Promise<{ roomId: string }> }) {
   try {
     const { supabase } = await getRouteContext(request);
@@ -14,7 +25,12 @@ export async function GET(request: Request, context: { params: Promise<{ roomId:
       .eq("status", "pending")
       .order("created_at", { ascending: false });
 
-    if (error) throw error;
+    if (error) {
+      if (isMissingRequestsTable(error)) {
+        return json({ requests: [] });
+      }
+      throw error;
+    }
     return json({ requests: data ?? [] });
   } catch (error) {
     return errorJson(error);
@@ -57,7 +73,12 @@ export async function POST(request: Request, context: { params: Promise<{ roomId
       )
       .single();
 
-    if (error) throw error;
+    if (error) {
+      if (isMissingRequestsTable(error)) {
+        return json({ error: "Chưa thể gửi yêu cầu lúc này." }, { status: 400 });
+      }
+      throw error;
+    }
     return json({ request: data }, { status: 201 });
   } catch (error) {
     return errorJson(error);

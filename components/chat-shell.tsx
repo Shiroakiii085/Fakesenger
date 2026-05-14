@@ -26,6 +26,12 @@ type ApiOptions = {
   body?: unknown;
 };
 
+class AuthExpiredError extends Error {
+  constructor() {
+    super("Phiên đăng nhập đã hết hạn.");
+  }
+}
+
 function initials(name?: string | null) {
   const value = name?.trim() || "?";
   return value
@@ -70,6 +76,10 @@ function authErrorMessage(error: unknown, mode: "login" | "signup") {
   }
 
   return error.message;
+}
+
+function shouldIgnoreBackgroundError(error: unknown) {
+  return error instanceof AuthExpiredError;
 }
 
 export function ChatShell() {
@@ -136,6 +146,9 @@ export function ChatShell() {
       });
 
       const data = await response.json().catch(() => ({}));
+      if (response.status === 401) {
+        throw new AuthExpiredError();
+      }
       if (!response.ok) {
         throw new Error(data.error || "Có lỗi xảy ra. Vui lòng thử lại.");
       }
@@ -218,7 +231,9 @@ export function ChatShell() {
     supabase.auth.getSession().then(async ({ data }) => {
       setSession(data.session);
       if (data.session) {
-        await bootstrapProfile(data.session).catch((error) => setNotice(error.message));
+        await bootstrapProfile(data.session).catch((error) => {
+          if (!shouldIgnoreBackgroundError(error)) setNotice(error.message);
+        });
       }
     });
 
@@ -227,7 +242,9 @@ export function ChatShell() {
     } = supabase.auth.onAuthStateChange((_event, nextSession) => {
       setSession(nextSession);
       if (nextSession) {
-        bootstrapProfile(nextSession).catch((error) => setNotice(error.message));
+        bootstrapProfile(nextSession).catch((error) => {
+          if (!shouldIgnoreBackgroundError(error)) setNotice(error.message);
+        });
       } else {
         setProfile(null);
         setRooms([]);
@@ -241,7 +258,9 @@ export function ChatShell() {
   }, [bootstrapProfile, isSupabaseConfigured, supabase]);
 
   useEffect(() => {
-    loadRooms().catch((error) => setNotice(error.message));
+    loadRooms().catch((error) => {
+      if (!shouldIgnoreBackgroundError(error)) setNotice(error.message);
+    });
   }, [loadRooms, profile?.id]);
 
   useEffect(() => {
@@ -252,14 +271,19 @@ export function ChatShell() {
       return;
     }
 
-    loadMessages(activeRoomId).catch((error) => setNotice(error.message));
+    loadMessages(activeRoomId).catch((error) => {
+      if (!shouldIgnoreBackgroundError(error)) setNotice(error.message);
+    });
 
     const channel = supabase
       .channel(`room-${activeRoomId}`)
       .on(
         "postgres_changes",
         { event: "INSERT", schema: "public", table: "messages", filter: `room_id=eq.${activeRoomId}` },
-        () => loadMessages(activeRoomId).catch((error) => setNotice(error.message))
+        () =>
+          loadMessages(activeRoomId).catch((error) => {
+            if (!shouldIgnoreBackgroundError(error)) setNotice(error.message);
+          })
       )
       .subscribe();
 
@@ -301,8 +325,10 @@ export function ChatShell() {
 
   useEffect(() => {
     if (!isDetailsOpen || !activeRoom || activeRoom.type === "direct") return;
-    loadMemberRequests(activeRoom.id).catch((error) => setNotice(error.message));
-  }, [activeRoom, isDetailsOpen, loadMemberRequests]);
+    loadMemberRequests(activeRoom.id).catch((error) => {
+      if (!shouldIgnoreBackgroundError(error)) setNotice(error.message);
+    });
+  }, [activeRoom?.id, activeRoom?.type, isDetailsOpen, loadMemberRequests]);
 
   useEffect(() => {
     const timeout = window.setTimeout(async () => {
@@ -447,6 +473,17 @@ export function ChatShell() {
     } catch (error) {
       setNotice(error instanceof Error ? error.message : "Không thể lưu hồ sơ.");
     }
+  }
+
+  async function handleSignOut() {
+    setNotice("");
+    setIsAccountMenuOpen(false);
+    setSession(null);
+    setProfile(null);
+    setRooms([]);
+    setMessages([]);
+    setActiveRoomId(null);
+    await supabase.auth.signOut();
   }
 
   async function addMemberDirect(targetUserId: string) {
@@ -616,7 +653,7 @@ export function ChatShell() {
               <button type="button" onClick={saveProfile}>
                 Lưu hồ sơ
               </button>
-              <button className="profile-logout" type="button" onClick={() => supabase.auth.signOut()}>
+              <button className="profile-logout" type="button" onClick={handleSignOut}>
                 <LogOut size={17} />
                 Đăng xuất
               </button>
