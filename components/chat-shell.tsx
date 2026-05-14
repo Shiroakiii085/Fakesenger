@@ -126,6 +126,7 @@ export function ChatShell() {
   const [rooms, setRooms] = useState<Room[]>([]);
   const [activeRoomId, setActiveRoomId] = useState<string | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
+  const [isMessagesLoading, setIsMessagesLoading] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [searchResults, setSearchResults] = useState<Profile[]>([]);
   const [messageDraft, setMessageDraft] = useState("");
@@ -147,6 +148,7 @@ export function ChatShell() {
   const [memberRequests, setMemberRequests] = useState<MemberRequest[]>([]);
   const [isMemberActionBusy, setIsMemberActionBusy] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
+  const messagesLoadIdRef = useRef(0);
   const sessionRef = useRef<Session | null>(null);
   const activeRoomRef = useRef<Room | null>(null);
   const bootstrappedUserIdRef = useRef<string | null>(null);
@@ -255,8 +257,9 @@ export function ChatShell() {
   );
 
   const loadMessages = useCallback(
-    async (roomId: string) => {
+    async (roomId: string, loadId?: number) => {
       const data = await authFetch<{ messages: Message[] }>(`/api/rooms/${roomId}/messages`);
+      if (loadId && loadId !== messagesLoadIdRef.current) return;
       setMessages(dedupeMessages(data.messages));
     },
     [authFetch]
@@ -350,12 +353,22 @@ export function ChatShell() {
 
     if (!activeRoomId) {
       setMessages([]);
+      setIsMessagesLoading(false);
       return;
     }
 
-    loadMessages(activeRoomId).catch((error) => {
-      if (!shouldIgnoreBackgroundError(error)) setNotice(error.message);
-    });
+    const loadId = messagesLoadIdRef.current + 1;
+    messagesLoadIdRef.current = loadId;
+    setMessages([]);
+    setIsMessagesLoading(true);
+
+    loadMessages(activeRoomId, loadId)
+      .catch((error) => {
+        if (!shouldIgnoreBackgroundError(error)) setNotice(error.message);
+      })
+      .finally(() => {
+        if (messagesLoadIdRef.current === loadId) setIsMessagesLoading(false);
+      });
 
     const channel = supabase
       .channel(`room-${activeRoomId}`)
@@ -880,21 +893,31 @@ export function ChatShell() {
             </header>
 
             <div className="messages">
-              {messages.map((message) => {
-                const mine = message.user_id === profile.id;
-                const pending = isLocalMessage(message);
-                return (
-                  <article key={message.id} className={`message-row ${mine ? "mine" : ""} ${pending ? "pending" : ""}`}>
-                    {!mine && <span className="avatar">{initials(message.profiles?.display_name)}</span>}
-                    <div className="bubble">
-                      {!mine && <strong>{message.profiles?.display_name || "Thành viên"}</strong>}
-                      <p>{message.body}</p>
-                      <time>{pending ? "Đang gửi" : formatTime(message.created_at)}</time>
-                    </div>
-                  </article>
-                );
-              })}
-              {messages.length === 0 && (
+              {isMessagesLoading && (
+                <div className="message-loading" aria-label="Đang tải tin nhắn">
+                  <span className="loading-line short" />
+                  <span className="loading-line" />
+                  <span className="loading-line mine" />
+                  <span className="loading-line wide" />
+                </div>
+              )}
+
+              {!isMessagesLoading &&
+                messages.map((message) => {
+                  const mine = message.user_id === profile.id;
+                  const pending = isLocalMessage(message);
+                  return (
+                    <article key={message.id} className={`message-row ${mine ? "mine" : ""} ${pending ? "pending" : ""}`}>
+                      {!mine && <span className="avatar">{initials(message.profiles?.display_name)}</span>}
+                      <div className="bubble">
+                        {!mine && <strong>{message.profiles?.display_name || "Thành viên"}</strong>}
+                        <p>{message.body}</p>
+                        <time>{pending ? "Đang gửi" : formatTime(message.created_at)}</time>
+                      </div>
+                    </article>
+                  );
+                })}
+              {!isMessagesLoading && messages.length === 0 && (
                 <div className="empty-conversation">
                   <MessageCircle size={34} />
                   <h3>Chưa có tin nhắn</h3>
