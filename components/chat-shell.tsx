@@ -87,6 +87,27 @@ function appendUniqueMessage(current: Message[], message: Message) {
   return [...current, message];
 }
 
+function isLocalMessage(message: Message) {
+  return message.id.startsWith("local-");
+}
+
+function isMatchingPendingMessage(message: Message, incoming: Message) {
+  return isLocalMessage(message) && message.user_id === incoming.user_id && message.room_id === incoming.room_id && message.body === incoming.body;
+}
+
+function upsertServerMessage(current: Message[], incoming: Message) {
+  if (current.some((item) => item.id === incoming.id)) {
+    return current.filter((item) => !isMatchingPendingMessage(item, incoming));
+  }
+
+  const pendingIndex = current.findIndex((item) => isMatchingPendingMessage(item, incoming));
+  if (pendingIndex >= 0) {
+    return current.map((item, index) => (index === pendingIndex ? incoming : item));
+  }
+
+  return [...current, incoming];
+}
+
 function dedupeMessages(messages: Message[]) {
   const seen = new Set<string>();
   return messages.filter((message) => {
@@ -344,7 +365,7 @@ export function ChatShell() {
         (payload) => {
           const row = payload.new as Omit<Message, "profiles">;
           const sender = activeRoomRef.current?.members.find((member) => member.user_id === row.user_id)?.profiles ?? null;
-          setMessages((current) => appendUniqueMessage(current, { ...row, profiles: sender }));
+          setMessages((current) => upsertServerMessage(current, { ...row, profiles: sender }));
         }
       )
       .subscribe();
@@ -515,21 +536,35 @@ export function ChatShell() {
 
   async function sendMessage(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!activeRoom || !messageDraft.trim() || !canSend) return;
+    if (!activeRoom || !profile || !messageDraft.trim() || !canSend) return;
 
     const body = messageDraft;
+    const pendingId = `local-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    const pendingMessage: Message = {
+      id: pendingId,
+      room_id: activeRoom.id,
+      user_id: profile.id,
+      body,
+      created_at: new Date().toISOString(),
+      edited_at: null,
+      is_deleted: false,
+      profiles: profile
+    };
+
     setMessageDraft("");
+    setMessages((current) => appendUniqueMessage(current, pendingMessage));
 
     try {
       const data = await authFetch<{ message: Message }>(`/api/rooms/${activeRoom.id}/messages`, {
         method: "POST",
         body: { body }
       });
-      setMessages((current) => appendUniqueMessage(current, data.message));
+      setMessages((current) => upsertServerMessage(current, data.message));
       setRooms((current) =>
         current.map((room) => (room.id === activeRoom.id ? { ...room, updated_at: data.message.created_at } : room))
       );
     } catch (error) {
+      setMessages((current) => current.filter((message) => message.id !== pendingId));
       setMessageDraft(body);
       setNotice(error instanceof Error ? error.message : "Không thể gửi tin nhắn.");
     }
@@ -847,13 +882,14 @@ export function ChatShell() {
             <div className="messages">
               {messages.map((message) => {
                 const mine = message.user_id === profile.id;
+                const pending = isLocalMessage(message);
                 return (
-                  <article key={message.id} className={`message-row ${mine ? "mine" : ""}`}>
+                  <article key={message.id} className={`message-row ${mine ? "mine" : ""} ${pending ? "pending" : ""}`}>
                     {!mine && <span className="avatar">{initials(message.profiles?.display_name)}</span>}
                     <div className="bubble">
                       {!mine && <strong>{message.profiles?.display_name || "Thành viên"}</strong>}
                       <p>{message.body}</p>
-                      <time>{formatTime(message.created_at)}</time>
+                      <time>{pending ? "Đang gửi" : formatTime(message.created_at)}</time>
                     </div>
                   </article>
                 );

@@ -568,6 +568,10 @@ label {
   border-color: var(--mint-dark);
 }
 
+.message-row.pending .bubble {
+  opacity: 0.78;
+}
+
 .bubble strong {
   display: block;
   margin-bottom: 5px;
