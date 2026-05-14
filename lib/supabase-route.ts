@@ -62,6 +62,6 @@ export function errorJson(error: unknown, status = 400) {
     return json({ error: [message, details, hint].filter(Boolean).join(" ") }, { status });
   }
 
-  const message = error instanceof Error ? error.message : "Unexpected error";
+  const message = error instanceof Error ? error.message : "Có lỗi xảy ra. Vui lòng thử lại.";
   return json({ error: message }, { status });
 }

@@ -57,16 +57,16 @@ function authErrorMessage(error: unknown, mode: "login" | "signup") {
 
   const code = (error as { code?: unknown }).code;
   if (code === "email_address_invalid") {
-    return "Supabase không chấp nhận email này. Hãy dùng email thật, ví dụ Gmail, Outlook hoặc email trường.";
+    return "Email không hợp lệ. Vui lòng dùng email thật.";
   }
   if (code === "signup_disabled") {
-    return "Supabase đang tắt đăng ký. Vào Authentication > Providers > Email và bật Allow new users to sign up.";
+    return "Hiện chưa thể tạo tài khoản mới.";
   }
   if (code === "weak_password") {
-    return "Mật khẩu quá yếu. Hãy dùng mật khẩu dài hơn, tối thiểu 6 ký tự.";
+    return "Mật khẩu quá yếu. Vui lòng dùng mật khẩu dài hơn.";
   }
   if (code === "over_email_send_rate_limit" || code === "email_rate_limit_exceeded") {
-    return "Supabase đang giới hạn gửi email xác nhận. Hãy tắt Confirm email trong Supabase để demo nhanh, hoặc đợi vài phút rồi thử lại.";
+    return "Bạn đã thử quá nhiều lần. Vui lòng đợi vài phút rồi thử lại.";
   }
 
   return error.message;
@@ -123,7 +123,7 @@ export function ChatShell() {
     async <T,>(url: string, options: ApiOptions = {}): Promise<T> => {
       const token = session?.access_token;
       if (!token) {
-        throw new Error("Bạn cần đăng nhập lại.");
+        throw new Error("Phiên đăng nhập đã hết hạn. Vui lòng đăng nhập lại.");
       }
 
       const response = await fetch(url, {
@@ -137,7 +137,7 @@ export function ChatShell() {
 
       const data = await response.json().catch(() => ({}));
       if (!response.ok) {
-        throw new Error(data.error || "Request thất bại.");
+        throw new Error(data.error || "Có lỗi xảy ra. Vui lòng thử lại.");
       }
 
       return data as T;
@@ -156,7 +156,7 @@ export function ChatShell() {
 
   const getRoomSubtitle = useCallback(
     (room: Room) => {
-      if (room.type === "channel") return "Kênh thông báo, chỉ admin gửi";
+      if (room.type === "channel") return "Kênh thông báo, chỉ quản trị viên gửi";
       if (room.type === "group") return `${room.members.length} thành viên cùng chat`;
       const other = room.members.find((member) => member.user_id !== profile?.id)?.profiles;
       return other?.email || "Chat 1:1";
@@ -317,7 +317,7 @@ export function ChatShell() {
         );
         setMemberSearchResults(data.profiles.filter((user) => !activeRoomMemberIds.has(user.id)));
       } catch (error) {
-        setNotice(error instanceof Error ? error.message : "Khong the tim nguoi dung.");
+        setNotice(error instanceof Error ? error.message : "Không thể tìm người dùng.");
       }
     }, 250);
 
@@ -332,12 +332,9 @@ export function ChatShell() {
             <Settings size={34} />
           </div>
           <div>
-            <p className="eyebrow">Cấu hình còn thiếu</p>
-            <h1>Thêm Supabase env để chạy chat</h1>
-            <p className="auth-copy">
-              Tạo `.env.local` từ `.env.example`, điền `NEXT_PUBLIC_SUPABASE_URL` và `NEXT_PUBLIC_SUPABASE_ANON_KEY`,
-              sau đó chạy lại app.
-            </p>
+            <p className="eyebrow">Fakesenger</p>
+            <h1>Ứng dụng chưa sẵn sàng</h1>
+            <p className="auth-copy">Vui lòng thử lại sau.</p>
           </div>
         </section>
       </main>
@@ -358,7 +355,7 @@ export function ChatShell() {
           }
         });
         if (error) throw error;
-        setNotice("Đăng ký thành công. Nếu Supabase bật xác thực email, hãy kiểm tra hộp thư.");
+        setNotice("Đăng ký thành công. Vui lòng đăng nhập để tiếp tục.");
       } else {
         const { error } = await supabase.auth.signInWithPassword({ email, password });
         if (error) throw error;
@@ -482,7 +479,7 @@ export function ChatShell() {
       setMemberSearchQuery("");
       setMemberSearchResults([]);
       await loadMemberRequests(activeRoom.id);
-      setNotice("Đã gửi yêu cầu cho admin duyệt.");
+      setNotice("Đã gửi yêu cầu cho quản trị viên duyệt.");
     } catch (error) {
       setNotice(error instanceof Error ? error.message : "Không thể gửi yêu cầu.");
     } finally {
@@ -531,7 +528,7 @@ export function ChatShell() {
             <MessageCircle size={34} />
           </div>
           <div>
-            <p className="eyebrow">Student Messenger</p>
+            <p className="eyebrow">Fakesenger</p>
             <h1>Fakesenger</h1>
           </div>
 
@@ -693,7 +690,7 @@ export function ChatShell() {
                 {currentMember?.role === "admin" && (
                   <span className="role-badge">
                     <Shield size={15} />
-                    Admin
+                    Quản trị viên
                   </span>
                 )}
                 {activeRoom.type !== "direct" && (
@@ -737,7 +734,7 @@ export function ChatShell() {
               <input
                 value={messageDraft}
                 onChange={(event) => setMessageDraft(event.target.value)}
-                placeholder={canSend ? "Nhập tin nhắn..." : "Kênh này chỉ admin được gửi tin"}
+                placeholder={canSend ? "Nhập tin nhắn..." : "Kênh này chỉ quản trị viên được gửi tin"}
                 disabled={!canSend}
               />
               <button className="send-button" type="submit" disabled={!canSend || !messageDraft.trim()} title="Gửi">
@@ -749,7 +746,7 @@ export function ChatShell() {
           <div className="blank-panel">
             <MessageCircle size={42} />
             <h2>Chọn hoặc tạo một cuộc trò chuyện</h2>
-            <p>Project hỗ trợ đủ 3 kiểu: chat riêng 1:1, kênh 1:N và nhóm N-N.</p>
+            <p>Bắt đầu nhắn tin với bạn bè hoặc nhóm của bạn.</p>
           </div>
         )}
       </section>
@@ -771,7 +768,7 @@ export function ChatShell() {
                 <input
                   value={memberSearchQuery}
                   onChange={(event) => setMemberSearchQuery(event.target.value)}
-                  placeholder={isRoomAdmin ? "Tìm người để thêm" : "Tìm người để admin duyệt"}
+                  placeholder={isRoomAdmin ? "Tìm người để thêm" : "Tìm người để quản trị viên duyệt"}
                 />
               </div>
             </label>
@@ -840,7 +837,7 @@ export function ChatShell() {
                 <span className="avatar">{initials(member.profiles?.display_name)}</span>
                 <span>
                   <strong>{member.profiles?.display_name || "Thành viên"}</strong>
-                  <small>{member.role === "admin" ? "Admin" : member.profiles?.status || "member"}</small>
+                  <small>{member.role === "admin" ? "Quản trị viên" : member.profiles?.status || "Thành viên"}</small>
                 </span>
                 {isRoomAdmin && member.role !== "admin" && member.user_id !== profile.id && (
                   <button
@@ -866,7 +863,7 @@ export function ChatShell() {
               <X size={18} />
             </button>
             <h2>Tạo phòng chat</h2>
-            <p>Nhóm cho mọi người cùng nhắn, kênh chỉ admin gửi thông báo.</p>
+            <p>Nhóm cho mọi người cùng nhắn, kênh chỉ quản trị viên gửi thông báo.</p>
 
             <div className="segmented">
               <button type="button" className={newRoomType === "group" ? "active" : ""} onClick={() => setNewRoomType("group")}>

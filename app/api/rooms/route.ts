@@ -45,7 +45,7 @@ export async function POST(request: Request) {
       : [];
 
     if (!name) {
-      return json({ error: "Ten phong la bat buoc" }, { status: 400 });
+      return json({ error: "Vui lòng nhập tên phòng." }, { status: 400 });
     }
 
     const roomInsert = await supabase

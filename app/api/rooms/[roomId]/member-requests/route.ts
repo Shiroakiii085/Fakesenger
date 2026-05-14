@@ -29,7 +29,7 @@ export async function POST(request: Request, context: { params: Promise<{ roomId
     const targetUserId = String(body.targetUserId ?? "");
 
     if (!targetUserId || targetUserId === user.id) {
-      return json({ error: "Nguoi duoc them khong hop le" }, { status: 400 });
+      return json({ error: "Người được thêm không hợp lệ." }, { status: 400 });
     }
 
     const existingMember = await supabase
@@ -41,7 +41,7 @@ export async function POST(request: Request, context: { params: Promise<{ roomId
 
     if (existingMember.error) throw existingMember.error;
     if (existingMember.data) {
-      return json({ error: "Nguoi nay da o trong nhom" }, { status: 400 });
+      return json({ error: "Người này đã ở trong nhóm." }, { status: 400 });
     }
 
     const { data, error } = await supabase

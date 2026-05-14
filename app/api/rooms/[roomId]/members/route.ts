@@ -9,7 +9,7 @@ export async function POST(request: Request, context: { params: Promise<{ roomId
     const role = body.role === "admin" ? "admin" : "member";
 
     if (!userId) {
-      return json({ error: "Thieu userId" }, { status: 400 });
+      return json({ error: "Vui lòng chọn thành viên." }, { status: 400 });
     }
 
     const { data, error } = await supabase
@@ -33,10 +33,10 @@ export async function DELETE(request: Request, context: { params: Promise<{ room
     const userId = url.searchParams.get("userId") || String((await request.json().catch(() => ({}))).userId ?? "");
 
     if (!userId) {
-      return json({ error: "Thieu userId" }, { status: 400 });
+      return json({ error: "Vui lòng chọn thành viên." }, { status: 400 });
     }
     if (userId === user.id) {
-      return json({ error: "Admin khong the tu xoa minh khoi nhom tai day" }, { status: 400 });
+      return json({ error: "Bạn không thể tự xoá mình khỏi nhóm tại đây." }, { status: 400 });
     }
 
     const { error } = await supabase.from("room_members").delete().eq("room_id", roomId).eq("user_id", userId);

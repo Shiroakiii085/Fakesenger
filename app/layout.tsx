@@ -2,8 +2,8 @@ import type { Metadata } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "Student Messenger",
-  description: "Chat 1:1, kenh thong bao va nhom realtime deploy tren Vercel"
+  title: "Fakesenger",
+  description: "Ứng dụng nhắn tin Fakesenger"
 };
 
 export default function RootLayout({

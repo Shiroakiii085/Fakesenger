@@ -7,7 +7,7 @@ export async function POST(request: Request) {
     const targetUserId = String(body.targetUserId ?? "");
 
     if (!targetUserId || targetUserId === user.id) {
-      return json({ error: "Nguoi nhan khong hop le" }, { status: 400 });
+      return json({ error: "Người nhận không hợp lệ." }, { status: 400 });
     }
 
     const directKey = [user.id, targetUserId].sort().join(":");
