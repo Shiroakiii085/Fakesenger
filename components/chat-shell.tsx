@@ -82,10 +82,25 @@ function shouldIgnoreBackgroundError(error: unknown) {
   return error instanceof AuthExpiredError;
 }
 
+function appendUniqueMessage(current: Message[], message: Message) {
+  if (current.some((item) => item.id === message.id)) return current;
+  return [...current, message];
+}
+
+function dedupeMessages(messages: Message[]) {
+  const seen = new Set<string>();
+  return messages.filter((message) => {
+    if (seen.has(message.id)) return false;
+    seen.add(message.id);
+    return true;
+  });
+}
+
 export function ChatShell() {
   const supabase = useMemo(() => createBrowserSupabase(), []);
   const isSupabaseConfigured = hasSupabaseBrowserEnv();
   const [session, setSession] = useState<Session | null>(null);
+  const [isAuthLoading, setIsAuthLoading] = useState(true);
   const [profile, setProfile] = useState<Profile | null>(null);
   const [rooms, setRooms] = useState<Room[]>([]);
   const [activeRoomId, setActiveRoomId] = useState<string | null>(null);
@@ -111,6 +126,10 @@ export function ChatShell() {
   const [memberRequests, setMemberRequests] = useState<MemberRequest[]>([]);
   const [isMemberActionBusy, setIsMemberActionBusy] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
+  const sessionRef = useRef<Session | null>(null);
+  const activeRoomRef = useRef<Room | null>(null);
+  const bootstrappedUserIdRef = useRef<string | null>(null);
+  const isSigningUpRef = useRef(false);
 
   const activeRoom = useMemo(
     () => rooms.find((room) => room.id === activeRoomId) ?? null,
@@ -129,11 +148,15 @@ export function ChatShell() {
     [activeRoom?.members]
   );
 
+  useEffect(() => {
+    activeRoomRef.current = activeRoom;
+  }, [activeRoom]);
+
   const authFetch = useCallback(
     async <T,>(url: string, options: ApiOptions = {}): Promise<T> => {
-      const token = session?.access_token;
+      const token = sessionRef.current?.access_token;
       if (!token) {
-        throw new Error("Phiên đăng nhập đã hết hạn. Vui lòng đăng nhập lại.");
+        throw new AuthExpiredError();
       }
 
       const response = await fetch(url, {
@@ -155,7 +178,7 @@ export function ChatShell() {
 
       return data as T;
     },
-    [session?.access_token]
+    []
   );
 
   const getRoomTitle = useCallback(
@@ -178,11 +201,11 @@ export function ChatShell() {
   );
 
   const loadRooms = useCallback(async () => {
-    if (!session) return;
+    if (!sessionRef.current?.access_token) return;
     const data = await authFetch<{ rooms: Room[] }>("/api/rooms");
     setRooms(data.rooms);
     setActiveRoomId((current) => current ?? data.rooms[0]?.id ?? null);
-  }, [authFetch, session]);
+  }, [authFetch]);
 
   const bootstrapProfile = useCallback(
     async (nextSession: Session) => {
@@ -205,6 +228,7 @@ export function ChatShell() {
         displayName: data.profile.display_name || "",
         status: data.profile.status || ""
       });
+      bootstrappedUserIdRef.current = nextSession.user.id;
     },
     []
   );
@@ -212,7 +236,7 @@ export function ChatShell() {
   const loadMessages = useCallback(
     async (roomId: string) => {
       const data = await authFetch<{ messages: Message[] }>(`/api/rooms/${roomId}/messages`);
-      setMessages(data.messages);
+      setMessages(dedupeMessages(data.messages));
     },
     [authFetch]
   );
@@ -226,35 +250,72 @@ export function ChatShell() {
   );
 
   useEffect(() => {
-    if (!isSupabaseConfigured) return;
+    if (!isSupabaseConfigured) {
+      setIsAuthLoading(false);
+      return;
+    }
 
-    supabase.auth.getSession().then(async ({ data }) => {
-      setSession(data.session);
-      if (data.session) {
-        await bootstrapProfile(data.session).catch((error) => {
-          if (!shouldIgnoreBackgroundError(error)) setNotice(error.message);
-        });
-      }
-    });
+    let isMounted = true;
+
+    supabase.auth
+      .getSession()
+      .then(async ({ data }) => {
+        if (!isMounted) return;
+        sessionRef.current = data.session;
+        setSession(data.session);
+        if (data.session) {
+          await bootstrapProfile(data.session).catch((error) => {
+            if (!shouldIgnoreBackgroundError(error)) setNotice(error.message);
+          });
+        }
+      })
+      .catch(() => {
+        if (isMounted) setNotice("Không thể kiểm tra phiên đăng nhập.");
+      })
+      .finally(() => {
+        if (isMounted) setIsAuthLoading(false);
+      });
 
     const {
       data: { subscription }
-    } = supabase.auth.onAuthStateChange((_event, nextSession) => {
+    } = supabase.auth.onAuthStateChange((event, nextSession) => {
+      if (!isMounted) return;
+      if (isSigningUpRef.current && event === "SIGNED_IN") return;
+
+      if (event === "INITIAL_SESSION") return;
+      if (event === "TOKEN_REFRESHED") {
+        sessionRef.current = nextSession;
+        return;
+      }
+
+      sessionRef.current = nextSession;
       setSession(nextSession);
       if (nextSession) {
+        if (bootstrappedUserIdRef.current === nextSession.user.id && event !== "USER_UPDATED") {
+          setIsAuthLoading(false);
+          return;
+        }
         bootstrapProfile(nextSession).catch((error) => {
           if (!shouldIgnoreBackgroundError(error)) setNotice(error.message);
         });
+      } else if (nextSession) {
+        setIsAuthLoading(false);
       } else {
+        bootstrappedUserIdRef.current = null;
+        sessionRef.current = null;
         setProfile(null);
         setRooms([]);
         setMessages([]);
         setActiveRoomId(null);
         setIsAccountMenuOpen(false);
+        setIsAuthLoading(false);
       }
     });
 
-    return () => subscription.unsubscribe();
+    return () => {
+      isMounted = false;
+      subscription.unsubscribe();
+    };
   }, [bootstrapProfile, isSupabaseConfigured, supabase]);
 
   useEffect(() => {
@@ -280,10 +341,11 @@ export function ChatShell() {
       .on(
         "postgres_changes",
         { event: "INSERT", schema: "public", table: "messages", filter: `room_id=eq.${activeRoomId}` },
-        () =>
-          loadMessages(activeRoomId).catch((error) => {
-            if (!shouldIgnoreBackgroundError(error)) setNotice(error.message);
-          })
+        (payload) => {
+          const row = payload.new as Omit<Message, "profiles">;
+          const sender = activeRoomRef.current?.members.find((member) => member.user_id === row.user_id)?.profiles ?? null;
+          setMessages((current) => appendUniqueMessage(current, { ...row, profiles: sender }));
+        }
       )
       .subscribe();
 
@@ -373,6 +435,7 @@ export function ChatShell() {
 
     try {
       if (authMode === "signup") {
+        isSigningUpRef.current = true;
         const { error } = await supabase.auth.signUp({
           email,
           password,
@@ -381,6 +444,16 @@ export function ChatShell() {
           }
         });
         if (error) throw error;
+        await supabase.auth.signOut();
+        sessionRef.current = null;
+        bootstrappedUserIdRef.current = null;
+        setSession(null);
+        setProfile(null);
+        setRooms([]);
+        setMessages([]);
+        setActiveRoomId(null);
+        setAuthMode("login");
+        setPassword("");
         setNotice("Đăng ký thành công. Vui lòng đăng nhập để tiếp tục.");
       } else {
         const { error } = await supabase.auth.signInWithPassword({ email, password });
@@ -388,6 +461,8 @@ export function ChatShell() {
       }
     } catch (error) {
       setNotice(authErrorMessage(error, authMode));
+    } finally {
+      isSigningUpRef.current = false;
     }
   }
 
@@ -446,12 +521,14 @@ export function ChatShell() {
     setMessageDraft("");
 
     try {
-      await authFetch(`/api/rooms/${activeRoom.id}/messages`, {
+      const data = await authFetch<{ message: Message }>(`/api/rooms/${activeRoom.id}/messages`, {
         method: "POST",
         body: { body }
       });
-      await loadMessages(activeRoom.id);
-      await loadRooms();
+      setMessages((current) => appendUniqueMessage(current, data.message));
+      setRooms((current) =>
+        current.map((room) => (room.id === activeRoom.id ? { ...room, updated_at: data.message.created_at } : room))
+      );
     } catch (error) {
       setMessageDraft(body);
       setNotice(error instanceof Error ? error.message : "Không thể gửi tin nhắn.");
@@ -478,12 +555,14 @@ export function ChatShell() {
   async function handleSignOut() {
     setNotice("");
     setIsAccountMenuOpen(false);
+    sessionRef.current = null;
+    bootstrappedUserIdRef.current = null;
     setSession(null);
     setProfile(null);
     setRooms([]);
     setMessages([]);
     setActiveRoomId(null);
-    await supabase.auth.signOut();
+    await supabase.auth.signOut().catch(() => undefined);
   }
 
   async function addMemberDirect(targetUserId: string) {
@@ -555,6 +634,28 @@ export function ChatShell() {
     } finally {
       setIsMemberActionBusy(false);
     }
+  }
+
+  if (isAuthLoading) {
+    return (
+      <main className="auth-page">
+        <section className="auth-card loading-card">
+          <div className="brand-mark">
+            <MessageCircle size={34} />
+          </div>
+          <div>
+            <p className="eyebrow">Fakesenger</p>
+            <h1>Đang mở cuộc trò chuyện</h1>
+            <p className="auth-copy">Vui lòng đợi trong giây lát.</p>
+          </div>
+          <div className="loading-dots" aria-label="Đang tải">
+            <span />
+            <span />
+            <span />
+          </div>
+        </section>
+      </main>
+    );
   }
 
   if (!session || !profile) {
