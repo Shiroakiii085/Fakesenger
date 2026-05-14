@@ -3,6 +3,8 @@
 import {
   Bell,
   Hash,
+  Check,
+  Clock,
   LogOut,
   MessageCircle,
   Plus,
@@ -10,13 +12,14 @@ import {
   Send,
   Settings,
   Shield,
+  UserMinus,
   Users,
   X
 } from "lucide-react";
 import type { Session } from "@supabase/supabase-js";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createBrowserSupabase, hasSupabaseBrowserEnv } from "@/lib/supabase-browser";
-import type { Message, Profile, Room, RoomMember, RoomType } from "@/lib/types";
+import type { MemberRequest, Message, Profile, Room, RoomMember, RoomType } from "@/lib/types";
 
 type ApiOptions = {
   method?: string;
@@ -91,6 +94,11 @@ export function ChatShell() {
   const [newRoomDescription, setNewRoomDescription] = useState("");
   const [selectedUsers, setSelectedUsers] = useState<Profile[]>([]);
   const [profileDraft, setProfileDraft] = useState({ displayName: "", status: "" });
+  const [isDetailsOpen, setIsDetailsOpen] = useState(false);
+  const [memberSearchQuery, setMemberSearchQuery] = useState("");
+  const [memberSearchResults, setMemberSearchResults] = useState<Profile[]>([]);
+  const [memberRequests, setMemberRequests] = useState<MemberRequest[]>([]);
+  const [isMemberActionBusy, setIsMemberActionBusy] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
 
   const activeRoom = useMemo(
@@ -104,6 +112,11 @@ export function ChatShell() {
   );
 
   const canSend = Boolean(activeRoom && (activeRoom.type !== "channel" || currentMember?.role === "admin"));
+  const isRoomAdmin = currentMember?.role === "admin";
+  const activeRoomMemberIds = useMemo(
+    () => new Set(activeRoom?.members.map((member) => member.user_id) ?? []),
+    [activeRoom?.members]
+  );
 
   const authFetch = useCallback(
     async <T,>(url: string, options: ApiOptions = {}): Promise<T> => {
@@ -190,6 +203,14 @@ export function ChatShell() {
     [authFetch]
   );
 
+  const loadMemberRequests = useCallback(
+    async (roomId: string) => {
+      const data = await authFetch<{ requests: MemberRequest[] }>(`/api/rooms/${roomId}/member-requests`);
+      setMemberRequests(data.requests);
+    },
+    [authFetch]
+  );
+
   useEffect(() => {
     if (!isSupabaseConfigured) return;
 
@@ -250,6 +271,13 @@ export function ChatShell() {
   }, [messages.length, activeRoomId]);
 
   useEffect(() => {
+    setIsDetailsOpen(false);
+    setMemberSearchQuery("");
+    setMemberSearchResults([]);
+    setMemberRequests([]);
+  }, [activeRoomId]);
+
+  useEffect(() => {
     const timeout = window.setTimeout(async () => {
       if (!searchQuery.trim() || !session) {
         setSearchResults([]);
@@ -268,6 +296,31 @@ export function ChatShell() {
 
     return () => window.clearTimeout(timeout);
   }, [authFetch, searchQuery, session]);
+
+  useEffect(() => {
+    if (!isDetailsOpen || !activeRoom || activeRoom.type === "direct") return;
+    loadMemberRequests(activeRoom.id).catch((error) => setNotice(error.message));
+  }, [activeRoom, isDetailsOpen, loadMemberRequests]);
+
+  useEffect(() => {
+    const timeout = window.setTimeout(async () => {
+      if (!isDetailsOpen || !memberSearchQuery.trim() || !session) {
+        setMemberSearchResults([]);
+        return;
+      }
+
+      try {
+        const data = await authFetch<{ profiles: Profile[] }>(
+          `/api/profiles/search?q=${encodeURIComponent(memberSearchQuery.trim())}`
+        );
+        setMemberSearchResults(data.profiles.filter((user) => !activeRoomMemberIds.has(user.id)));
+      } catch (error) {
+        setNotice(error instanceof Error ? error.message : "Khong the tim nguoi dung.");
+      }
+    }, 250);
+
+    return () => window.clearTimeout(timeout);
+  }, [activeRoomMemberIds, authFetch, isDetailsOpen, memberSearchQuery, session]);
 
   if (!isSupabaseConfigured) {
     return (
@@ -396,6 +449,77 @@ export function ChatShell() {
     }
   }
 
+  async function addMemberDirect(targetUserId: string) {
+    if (!activeRoom) return;
+    setIsMemberActionBusy(true);
+    try {
+      await authFetch(`/api/rooms/${activeRoom.id}/members`, {
+        method: "POST",
+        body: { userId: targetUserId }
+      });
+      setMemberSearchQuery("");
+      setMemberSearchResults([]);
+      await loadRooms();
+      setNotice("Đã thêm thành viên vào nhóm.");
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "Không thể thêm thành viên.");
+    } finally {
+      setIsMemberActionBusy(false);
+    }
+  }
+
+  async function requestMemberAdd(targetUserId: string) {
+    if (!activeRoom) return;
+    setIsMemberActionBusy(true);
+    try {
+      await authFetch(`/api/rooms/${activeRoom.id}/member-requests`, {
+        method: "POST",
+        body: { targetUserId }
+      });
+      setMemberSearchQuery("");
+      setMemberSearchResults([]);
+      await loadMemberRequests(activeRoom.id);
+      setNotice("Đã gửi yêu cầu cho admin duyệt.");
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "Không thể gửi yêu cầu.");
+    } finally {
+      setIsMemberActionBusy(false);
+    }
+  }
+
+  async function removeMember(userId: string) {
+    if (!activeRoom || !profile || userId === profile.id) return;
+    setIsMemberActionBusy(true);
+    try {
+      await authFetch(`/api/rooms/${activeRoom.id}/members?userId=${encodeURIComponent(userId)}`, {
+        method: "DELETE"
+      });
+      await loadRooms();
+      setNotice("Đã xoá thành viên khỏi nhóm.");
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "Không thể xoá thành viên.");
+    } finally {
+      setIsMemberActionBusy(false);
+    }
+  }
+
+  async function decideMemberRequest(requestId: string, action: "approve" | "reject") {
+    if (!activeRoom) return;
+    setIsMemberActionBusy(true);
+    try {
+      await authFetch(`/api/rooms/${activeRoom.id}/member-requests/${requestId}`, {
+        method: "PATCH",
+        body: { action }
+      });
+      await Promise.all([loadRooms(), loadMemberRequests(activeRoom.id)]);
+      setNotice(action === "approve" ? "Đã duyệt yêu cầu thêm thành viên." : "Đã từ chối yêu cầu.");
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "Không thể xử lý yêu cầu.");
+    } finally {
+      setIsMemberActionBusy(false);
+    }
+  }
+
   if (!session || !profile) {
     return (
       <main className="auth-page">
@@ -455,7 +579,7 @@ export function ChatShell() {
   }
 
   return (
-    <main className="chat-page">
+    <main className={`chat-page ${isDetailsOpen && activeRoom && activeRoom.type !== "direct" ? "with-details" : ""}`}>
       <aside className="sidebar">
         <div className="sidebar-top">
           <div className="avatar avatar-large">{initials(profile.display_name)}</div>
@@ -550,12 +674,24 @@ export function ChatShell() {
                   <p>{getRoomSubtitle(activeRoom)}</p>
                 </div>
               </div>
-              {currentMember?.role === "admin" && (
-                <span className="role-badge">
-                  <Shield size={15} />
-                  Admin
-                </span>
-              )}
+              <div className="header-actions">
+                {currentMember?.role === "admin" && (
+                  <span className="role-badge">
+                    <Shield size={15} />
+                    Admin
+                  </span>
+                )}
+                {activeRoom.type !== "direct" && (
+                  <button
+                    className={`icon-button ${isDetailsOpen ? "dark" : ""}`}
+                    type="button"
+                    title="Cài đặt nhóm"
+                    onClick={() => setIsDetailsOpen((open) => !open)}
+                  >
+                    <Settings size={18} />
+                  </button>
+                )}
+              </div>
             </header>
 
             <div className="messages">
@@ -603,20 +739,110 @@ export function ChatShell() {
         )}
       </section>
 
-      <aside className="details">
-        <h3>Thành viên</h3>
-        <div className="member-list">
-          {activeRoom?.members.map((member: RoomMember) => (
-            <div className="member" key={member.user_id}>
-              <span className="avatar">{initials(member.profiles?.display_name)}</span>
-              <span>
-                <strong>{member.profiles?.display_name || "Thành viên"}</strong>
-                <small>{member.role === "admin" ? "Admin" : member.profiles?.status || "member"}</small>
-              </span>
+      {activeRoom && activeRoom.type !== "direct" && isDetailsOpen && (
+        <aside className="details">
+          <div className="details-header">
+            <h3>Cài đặt nhóm</h3>
+            <button className="icon-button" type="button" title="Đóng" onClick={() => setIsDetailsOpen(false)}>
+              <X size={17} />
+            </button>
+          </div>
+
+          <div className="member-tools">
+            <label>
+              {isRoomAdmin ? "Thêm thành viên" : "Yêu cầu thêm thành viên"}
+              <div className="search-box">
+                <Search size={17} />
+                <input
+                  value={memberSearchQuery}
+                  onChange={(event) => setMemberSearchQuery(event.target.value)}
+                  placeholder={isRoomAdmin ? "Tìm người để thêm" : "Tìm người để admin duyệt"}
+                />
+              </div>
+            </label>
+
+            {memberSearchResults.length > 0 && (
+              <div className="candidate-list compact">
+                {memberSearchResults.map((user) => (
+                  <button
+                    key={user.id}
+                    type="button"
+                    disabled={isMemberActionBusy}
+                    onClick={() => (isRoomAdmin ? addMemberDirect(user.id) : requestMemberAdd(user.id))}
+                  >
+                    <span className="avatar">{initials(user.display_name)}</span>
+                    <span>
+                      <strong>{user.display_name}</strong>
+                      <small>{isRoomAdmin ? "Thêm ngay" : "Gửi yêu cầu duyệt"}</small>
+                    </span>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {isRoomAdmin && (
+            <div className="request-panel">
+              <div className="field-row">
+                <Clock size={16} />
+                <span>Yêu cầu chờ duyệt</span>
+              </div>
+              {memberRequests.length === 0 && <p className="muted-copy">Chưa có yêu cầu mới.</p>}
+              {memberRequests.map((request) => (
+                <div className="request-item" key={request.id}>
+                  <span className="avatar">{initials(request.target?.display_name)}</span>
+                  <span>
+                    <strong>{request.target?.display_name || "Thành viên"}</strong>
+                    <small>Đề xuất bởi {request.requester?.display_name || "thành viên"}</small>
+                  </span>
+                  <button
+                    className="mini-action approve"
+                    type="button"
+                    title="Duyệt"
+                    disabled={isMemberActionBusy}
+                    onClick={() => decideMemberRequest(request.id, "approve")}
+                  >
+                    <Check size={15} />
+                  </button>
+                  <button
+                    className="mini-action reject"
+                    type="button"
+                    title="Từ chối"
+                    disabled={isMemberActionBusy}
+                    onClick={() => decideMemberRequest(request.id, "reject")}
+                  >
+                    <X size={15} />
+                  </button>
+                </div>
+              ))}
             </div>
-          ))}
-        </div>
-      </aside>
+          )}
+
+          <h3>Thành viên</h3>
+          <div className="member-list">
+            {activeRoom.members.map((member: RoomMember) => (
+              <div className="member manageable" key={member.user_id}>
+                <span className="avatar">{initials(member.profiles?.display_name)}</span>
+                <span>
+                  <strong>{member.profiles?.display_name || "Thành viên"}</strong>
+                  <small>{member.role === "admin" ? "Admin" : member.profiles?.status || "member"}</small>
+                </span>
+                {isRoomAdmin && member.role !== "admin" && member.user_id !== profile.id && (
+                  <button
+                    className="mini-action reject"
+                    type="button"
+                    title="Xoá khỏi nhóm"
+                    disabled={isMemberActionBusy}
+                    onClick={() => removeMember(member.user_id)}
+                  >
+                    <UserMinus size={15} />
+                  </button>
+                )}
+              </div>
+            ))}
+          </div>
+        </aside>
+      )}
 
       {isRoomComposerOpen && (
         <div className="modal-backdrop">

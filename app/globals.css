@@ -183,8 +183,12 @@ label {
 .chat-page {
   min-height: 100vh;
   display: grid;
-  grid-template-columns: 330px minmax(0, 1fr) 280px;
+  grid-template-columns: 330px minmax(0, 1fr);
   gap: 0;
+}
+
+.chat-page.with-details {
+  grid-template-columns: 330px minmax(0, 1fr) 300px;
 }
 
 .sidebar,
@@ -201,6 +205,19 @@ label {
 .details {
   border-right: 0;
   border-left: 1px solid var(--line);
+}
+
+.details-header,
+.header-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.header-actions {
+  justify-content: flex-end;
+  flex: 0 0 auto;
 }
 
 .sidebar-top {
@@ -341,6 +358,17 @@ label {
   background: #fffdfa;
   color: var(--ink);
   text-align: left;
+}
+
+.candidate-list.compact {
+  max-height: 220px;
+  overflow: auto;
+}
+
+.candidate-list button:disabled,
+.mini-action:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
 }
 
 .room-list {
@@ -533,6 +561,72 @@ label {
   font-size: 18px;
 }
 
+.member-tools,
+.request-panel {
+  display: grid;
+  gap: 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fbfaf6;
+  padding: 12px;
+}
+
+.request-item,
+.member.manageable {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+}
+
+.request-item {
+  grid-template-columns: auto minmax(0, 1fr) auto auto;
+  border-top: 1px solid var(--line);
+  padding-top: 10px;
+}
+
+.request-item strong,
+.request-item small {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.request-item small,
+.muted-copy {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.muted-copy {
+  margin: 0;
+}
+
+.mini-action {
+  width: 32px;
+  height: 32px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  display: grid;
+  place-items: center;
+  background: white;
+  color: var(--muted);
+}
+
+.mini-action.approve {
+  color: var(--mint-dark);
+  border-color: rgba(16, 126, 99, 0.28);
+  background: rgba(47, 191, 143, 0.1);
+}
+
+.mini-action.reject {
+  color: #9c3531;
+  border-color: rgba(239, 111, 108, 0.25);
+  background: #fff7f6;
+}
+
 .modal-backdrop {
   position: fixed;
   inset: 0;
@@ -609,12 +703,20 @@ label {
 }
 
 @media (max-width: 1040px) {
-  .chat-page {
+  .chat-page,
+  .chat-page.with-details {
     grid-template-columns: 310px minmax(0, 1fr);
   }
 
   .details {
-    display: none;
+    position: fixed;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 8;
+    width: min(340px, calc(100vw - 24px));
+    min-height: auto;
+    box-shadow: var(--shadow);
   }
 }
 

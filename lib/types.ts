@@ -38,3 +38,18 @@ export type Message = {
   is_deleted: boolean;
   profiles: Profile | null;
 };
+
+export type MemberRequestStatus = "pending" | "approved" | "rejected";
+
+export type MemberRequest = {
+  id: string;
+  room_id: string;
+  requester_id: string;
+  target_user_id: string;
+  status: MemberRequestStatus;
+  decided_by: string | null;
+  decided_at: string | null;
+  created_at: string;
+  requester: Profile | null;
+  target: Profile | null;
+};
