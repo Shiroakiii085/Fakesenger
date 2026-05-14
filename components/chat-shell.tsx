@@ -62,6 +62,9 @@ function authErrorMessage(error: unknown, mode: "login" | "signup") {
   if (code === "weak_password") {
     return "Mật khẩu quá yếu. Hãy dùng mật khẩu dài hơn, tối thiểu 6 ký tự.";
   }
+  if (code === "over_email_send_rate_limit" || code === "email_rate_limit_exceeded") {
+    return "Supabase đang giới hạn gửi email xác nhận. Hãy tắt Confirm email trong Supabase để demo nhanh, hoặc đợi vài phút rồi thử lại.";
+  }
 
   return error.message;
 }
