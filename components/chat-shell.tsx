@@ -47,6 +47,25 @@ function roomIcon(type: RoomType) {
   return <MessageCircle size={17} />;
 }
 
+function authErrorMessage(error: unknown, mode: "login" | "signup") {
+  if (!(error instanceof Error)) {
+    return mode === "signup" ? "Không thể đăng ký." : "Không thể đăng nhập.";
+  }
+
+  const code = (error as { code?: unknown }).code;
+  if (code === "email_address_invalid") {
+    return "Supabase không chấp nhận email này. Hãy dùng email thật, ví dụ Gmail, Outlook hoặc email trường.";
+  }
+  if (code === "signup_disabled") {
+    return "Supabase đang tắt đăng ký. Vào Authentication > Providers > Email và bật Allow new users to sign up.";
+  }
+  if (code === "weak_password") {
+    return "Mật khẩu quá yếu. Hãy dùng mật khẩu dài hơn, tối thiểu 6 ký tự.";
+  }
+
+  return error.message;
+}
+
 export function ChatShell() {
   const supabase = useMemo(() => createBrowserSupabase(), []);
   const isSupabaseConfigured = hasSupabaseBrowserEnv();
@@ -287,7 +306,7 @@ export function ChatShell() {
         if (error) throw error;
       }
     } catch (error) {
-      setNotice(error instanceof Error ? error.message : "Không thể đăng nhập.");
+      setNotice(authErrorMessage(error, authMode));
     }
   }
 
@@ -383,10 +402,7 @@ export function ChatShell() {
           </div>
           <div>
             <p className="eyebrow">Student Messenger</p>
-            <h1>Chat realtime deploy Vercel</h1>
-            <p className="auth-copy">
-              Một project đủ dùng cho bài sinh viên: chat riêng, nhóm, kênh thông báo, đăng nhập và dữ liệu thật.
-            </p>
+            <h1>Fakesenger</h1>
           </div>
 
           <form className="auth-form" onSubmit={handleAuth}>
@@ -408,7 +424,7 @@ export function ChatShell() {
 
             <label>
               Email
-              <input type="email" value={email} onChange={(event) => setEmail(event.target.value)} placeholder="you@example.com" required />
+              <input type="email" value={email} onChange={(event) => setEmail(event.target.value)} placeholder="ten@gmail.com" required />
             </label>
 
             <label>
