@@ -7,7 +7,7 @@ function isMissingRequestsTable(error: unknown) {
     value.code === "PGRST205" ||
     String(value.message ?? "")
       .toLowerCase()
-      .includes("member_requests")
+      .includes("could not find the table 'public.member_requests'")
   );
 }
 
@@ -31,7 +31,7 @@ export async function PATCH(
 
     if (requestResult.error) {
       if (isMissingRequestsTable(requestResult.error)) {
-        return json({ error: "Chưa thể xử lý yêu cầu lúc này." }, { status: 400 });
+        return json({ error: "Chua the xu ly yeu cau luc nay." }, { status: 400 });
       }
       throw requestResult.error;
     }
@@ -58,7 +58,7 @@ export async function PATCH(
 
     if (error) {
       if (isMissingRequestsTable(error)) {
-        return json({ error: "Chưa thể xử lý yêu cầu lúc này." }, { status: 400 });
+        return json({ error: "Chua the xu ly yeu cau luc nay." }, { status: 400 });
       }
       throw error;
     }

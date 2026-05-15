@@ -7,7 +7,7 @@ function isMissingRequestsTable(error: unknown) {
     value.code === "PGRST205" ||
     String(value.message ?? "")
       .toLowerCase()
-      .includes("member_requests")
+      .includes("could not find the table 'public.member_requests'")
   );
 }
 
@@ -26,9 +26,7 @@ export async function GET(request: Request, context: { params: Promise<{ roomId:
       .order("created_at", { ascending: false });
 
     if (error) {
-      if (isMissingRequestsTable(error)) {
-        return json({ requests: [] });
-      }
+      if (isMissingRequestsTable(error)) return json({ requests: [] });
       throw error;
     }
     return json({ requests: data ?? [] });
@@ -45,7 +43,7 @@ export async function POST(request: Request, context: { params: Promise<{ roomId
     const targetUserId = String(body.targetUserId ?? "");
 
     if (!targetUserId || targetUserId === user.id) {
-      return json({ error: "Người được thêm không hợp lệ." }, { status: 400 });
+      return json({ error: "Nguoi duoc them khong hop le." }, { status: 400 });
     }
 
     const existingMember = await supabase
@@ -57,7 +55,7 @@ export async function POST(request: Request, context: { params: Promise<{ roomId
 
     if (existingMember.error) throw existingMember.error;
     if (existingMember.data) {
-      return json({ error: "Người này đã ở trong nhóm." }, { status: 400 });
+      return json({ error: "Nguoi nay da o trong nhom." }, { status: 400 });
     }
 
     const { data, error } = await supabase
@@ -75,7 +73,10 @@ export async function POST(request: Request, context: { params: Promise<{ roomId
 
     if (error) {
       if (isMissingRequestsTable(error)) {
-        return json({ error: "Chưa thể gửi yêu cầu lúc này." }, { status: 400 });
+        return json({ error: "Chua the gui yeu cau luc nay." }, { status: 400 });
+      }
+      if (error.code === "23505") {
+        return json({ error: "Yeu cau nay dang cho duyet." }, { status: 409 });
       }
       throw error;
     }

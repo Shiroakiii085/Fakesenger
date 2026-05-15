@@ -638,6 +638,7 @@ export function ChatShell() {
 
           if (payload.type === "invite") {
             setCallRoomId(room.id);
+            callRoomIdRef.current = room.id;
             setCallMessageId(typeof payload.callMessageId === "string" ? payload.callMessageId : null);
             setIncomingCaller(room.members.find((member) => member.user_id === payload.from)?.profiles ?? null);
             setCallState("ringing");
