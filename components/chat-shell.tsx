@@ -236,6 +236,21 @@ function sortRoomsByRecent(rooms: Room[]) {
   return [...rooms].sort((first, second) => new Date(second.updated_at).getTime() - new Date(first.updated_at).getTime());
 }
 
+function getIceServers(): RTCIceServer[] {
+  const servers: RTCIceServer[] = [{ urls: "stun:stun.l.google.com:19302" }];
+  const turnUrls = process.env.NEXT_PUBLIC_TURN_URLS?.split(",").map((url) => url.trim()).filter(Boolean) ?? [];
+
+  if (turnUrls.length > 0) {
+    servers.push({
+      urls: turnUrls,
+      username: process.env.NEXT_PUBLIC_TURN_USERNAME,
+      credential: process.env.NEXT_PUBLIC_TURN_CREDENTIAL
+    });
+  }
+
+  return servers;
+}
+
 export function ChatShell() {
   const supabase = useMemo(() => createBrowserSupabase(), []);
   const isSupabaseConfigured = hasSupabaseBrowserEnv();
@@ -1177,7 +1192,7 @@ export function ChatShell() {
     if (existing) return existing;
     const stream = await ensureLocalCallStream();
     const peerConnection = new RTCPeerConnection({
-      iceServers: [{ urls: "stun:stun.l.google.com:19302" }]
+      iceServers: getIceServers()
     });
     peerConnectionsRef.current.set(peerId, peerConnection);
     const remoteStream = new MediaStream();
@@ -1197,6 +1212,14 @@ export function ChatShell() {
     peerConnection.onicecandidate = (event) => {
       if (event.candidate) {
         sendCallSignal({ type: "ice", to: peerId, candidate: event.candidate.toJSON() }).catch(() => undefined);
+      }
+    };
+    peerConnection.oniceconnectionstatechange = () => {
+      if (peerConnection.iceConnectionState === "failed") {
+        peerConnection.restartIce();
+        if (!process.env.NEXT_PUBLIC_TURN_URLS) {
+          setNotice("Không thể kết nối trực tiếp. Hãy cấu hình TURN để cuộc gọi ổn định trên iPhone.");
+        }
       }
     };
     return peerConnection;
