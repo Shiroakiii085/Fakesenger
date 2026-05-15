@@ -611,11 +611,17 @@ label {
 
 .bubble {
   position: relative;
+  width: fit-content;
+  max-width: 100%;
   border: 1px solid var(--line);
   border-radius: 8px;
   padding: 10px 12px;
   background: white;
   box-shadow: 0 10px 28px rgba(38, 50, 43, 0.08);
+}
+
+.media-bubble {
+  padding: 10px 12px 8px;
 }
 
 .message-row.mine .bubble {
@@ -690,7 +696,8 @@ label {
 
 .message-image {
   display: block;
-  width: min(320px, 100%);
+  width: auto;
+  max-width: min(320px, 100%);
   max-height: 320px;
   border-radius: 8px;
   object-fit: cover;
@@ -760,32 +767,9 @@ label {
   color: rgba(255, 255, 255, 0.82);
 }
 
-.message-actions {
-  position: absolute;
-  top: 7px;
-  right: 7px;
-}
-
-.message-actions > button {
-  width: 26px;
-  height: 26px;
-  border: 0;
-  border-radius: 8px;
-  display: grid;
-  place-items: center;
-  color: var(--muted);
-  background: rgba(255, 255, 255, 0.88);
-}
-
-.message-row.mine .message-actions > button {
-  color: white;
-  background: rgba(255, 255, 255, 0.16);
-}
-
 .message-menu {
   position: absolute;
   z-index: 3;
-  top: 31px;
   right: 0;
   width: 160px;
   display: grid;
@@ -795,6 +779,14 @@ label {
   padding: 6px;
   background: #fffdfa;
   box-shadow: var(--shadow);
+}
+
+.message-menu.down {
+  top: calc(100% + 8px);
+}
+
+.message-menu.up {
+  bottom: calc(100% + 8px);
 }
 
 .message-menu button {
@@ -828,6 +820,23 @@ label {
   padding: 16px 20px 20px;
   border-top: 1px solid var(--line);
   background: rgba(255, 255, 255, 0.76);
+}
+
+.edit-message-bar {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  gap: 8px;
+  padding: 0 20px 16px;
+  background: rgba(255, 255, 255, 0.76);
+}
+
+.edit-message-bar button {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 0 14px;
+  background: #fffdfa;
+  color: var(--ink);
+  font-weight: 800;
 }
 
 .hidden-file-input {

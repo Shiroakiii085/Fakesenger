@@ -10,7 +10,6 @@ import {
   Menu,
   Mic,
   MessageCircle,
-  MoreHorizontal,
   Pause,
   Phone,
   PhoneOff,
@@ -270,6 +269,9 @@ export function ChatShell() {
   const [isMemberActionBusy, setIsMemberActionBusy] = useState(false);
   const [isMobileRoomsOpen, setIsMobileRoomsOpen] = useState(false);
   const [openMessageMenuId, setOpenMessageMenuId] = useState<string | null>(null);
+  const [messageMenuDirection, setMessageMenuDirection] = useState<"up" | "down">("down");
+  const [editingMessageId, setEditingMessageId] = useState<string | null>(null);
+  const [editingMessageDraft, setEditingMessageDraft] = useState("");
   const [isUploadingMedia, setIsUploadingMedia] = useState(false);
   const [isRecordingAudio, setIsRecordingAudio] = useState(false);
   const [callState, setCallState] = useState<"idle" | "calling" | "ringing" | "active">("idle");
@@ -1097,6 +1099,36 @@ export function ChatShell() {
     }
   }
 
+  function toggleMessageMenu(event: React.MouseEvent<HTMLElement>, messageId: string) {
+    const rect = event.currentTarget.getBoundingClientRect();
+    const viewportBottomSpace = window.innerHeight - rect.bottom;
+    setMessageMenuDirection(viewportBottomSpace < 180 ? "up" : "down");
+    setOpenMessageMenuId((current) => (current === messageId ? null : messageId));
+  }
+
+  function startEditingMessage(message: Message) {
+    setEditingMessageId(message.id);
+    setEditingMessageDraft(message.body);
+    setOpenMessageMenuId(null);
+  }
+
+  async function saveEditedMessage(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!editingMessageId || !editingMessageDraft.trim()) return;
+
+    try {
+      const data = await authFetch<{ message: Message }>(`/api/messages/${editingMessageId}`, {
+        method: "PATCH",
+        body: { body: editingMessageDraft }
+      });
+      setMessages((current) => current.map((message) => (message.id === data.message.id ? data.message : message)));
+      setEditingMessageId(null);
+      setEditingMessageDraft("");
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "Không thể sửa tin nhắn.");
+    }
+  }
+
   async function sendCallSignal(payload: Record<string, unknown>) {
     const roomId = callRoomIdRef.current;
     if (!roomId) return;
@@ -1666,7 +1698,12 @@ export function ChatShell() {
                   return (
                     <article key={message.id} className={`message-row ${mine ? "mine" : ""} ${pending ? "pending" : ""}`}>
                       {!mine && <Avatar profile={message.profiles} />}
-                      <div className="bubble">
+                      <div
+                        className={`bubble ${message.kind === "image" ? "media-bubble" : ""}`}
+                        onClick={(event) => {
+                          if (!pending && !message.is_deleted) toggleMessageMenu(event, message.id);
+                        }}
+                      >
                         {!mine && <strong>{message.profiles?.display_name || "Thành viên"}</strong>}
                         {message.is_deleted ? (
                           <p className="deleted-message">Tin nhan da duoc go</p>
@@ -1683,26 +1720,38 @@ export function ChatShell() {
                           <p>{message.body}</p>
                         )}
                       <time>{pending ? "Đang gửi" : formatTime(message.created_at)}</time>
-                      {!pending && !message.is_deleted && (
-                        <div className="message-actions">
+                      {!pending && !message.is_deleted && openMessageMenuId === message.id && (
+                        <div className={`message-menu ${messageMenuDirection}`}>
+                          {mine && message.kind === "text" && (
+                            <button
+                              type="button"
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                startEditingMessage(message);
+                              }}
+                            >
+                              Sửa tin nhắn
+                            </button>
+                          )}
                           <button
                             type="button"
-                            title="Tuy chon"
-                            onClick={() => setOpenMessageMenuId((current) => (current === message.id ? null : message.id))}
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              removeMessage(message.id, "self");
+                            }}
                           >
-                            <MoreHorizontal size={16} />
+                            Gỡ với bản thân
                           </button>
-                          {openMessageMenuId === message.id && (
-                            <div className="message-menu">
-                              <button type="button" onClick={() => removeMessage(message.id, "self")}>
-                                Go khoi ban than
-                              </button>
-                              {mine && (
-                                <button type="button" onClick={() => removeMessage(message.id, "everyone")}>
-                                  Go voi moi nguoi
-                                </button>
-                              )}
-                            </div>
+                          {mine && (
+                            <button
+                              type="button"
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                removeMessage(message.id, "everyone");
+                              }}
+                            >
+                              Gỡ với mọi người
+                            </button>
                           )}
                         </div>
                       )}
@@ -1750,6 +1799,26 @@ export function ChatShell() {
                 <Send size={19} />
               </button>
             </form>
+
+            {editingMessageId && (
+              <form className="edit-message-bar" onSubmit={saveEditedMessage}>
+                <input
+                  value={editingMessageDraft}
+                  onChange={(event) => setEditingMessageDraft(event.target.value)}
+                  autoFocus
+                />
+                <button type="submit">Lưu</button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setEditingMessageId(null);
+                    setEditingMessageDraft("");
+                  }}
+                >
+                  Huỷ
+                </button>
+              </form>
+            )}
           </>
         ) : (
           <div className="blank-panel">

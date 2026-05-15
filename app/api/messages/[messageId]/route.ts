@@ -39,6 +39,7 @@ export async function PATCH(request: Request, context: { params: Promise<{ messa
     const { supabase, user } = await getRouteContext(request);
     const { messageId } = await context.params;
     const body = await request.json();
+    const nextBody = typeof body.body === "string" ? body.body.trim().slice(0, 2000) : null;
     const status =
       body.status === "ringing" ||
       body.status === "active" ||
@@ -48,6 +49,25 @@ export async function PATCH(request: Request, context: { params: Promise<{ messa
         ? body.status
         : null;
     const durationSeconds = Number.isFinite(body.durationSeconds) ? Math.max(0, Math.round(body.durationSeconds)) : null;
+
+    if (nextBody) {
+      const { data, error } = await supabase
+        .from("messages")
+        .update({
+          body: nextBody,
+          edited_at: new Date().toISOString()
+        })
+        .eq("id", messageId)
+        .eq("user_id", user.id)
+        .eq("kind", "text")
+        .eq("is_deleted", false)
+        .select("id,room_id,user_id,body,kind,media_url,call_status,call_duration_seconds,created_at,edited_at,is_deleted,profiles:profiles!messages_user_id_fkey(id,email,display_name,avatar_url,status)")
+        .maybeSingle();
+
+      if (error) throw error;
+      if (!data) return json({ error: "Ban khong the sua tin nhan nay." }, { status: 403 });
+      return json({ message: data });
+    }
 
     if (!status) return json({ error: "Trang thai cuoc goi khong hop le." }, { status: 400 });
 
