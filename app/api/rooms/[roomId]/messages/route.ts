@@ -11,7 +11,7 @@ export async function GET(request: Request, context: { params: Promise<{ roomId:
 
     const { data, error } = await supabase
       .from("messages")
-      .select("id,room_id,user_id,body,kind,media_url,created_at,edited_at,is_deleted,profiles:profiles(id,email,display_name,avatar_url,status)")
+      .select("id,room_id,user_id,body,kind,media_url,created_at,edited_at,is_deleted,profiles:profiles!messages_user_id_fkey(id,email,display_name,avatar_url,status)")
       .eq("room_id", roomId)
       .order("created_at", { ascending: true })
       .limit(200);
@@ -48,7 +48,7 @@ export async function POST(request: Request, context: { params: Promise<{ roomId
         kind,
         media_url: mediaUrl
       })
-      .select("id,room_id,user_id,body,kind,media_url,created_at,edited_at,is_deleted,profiles:profiles(id,email,display_name,avatar_url,status)")
+      .select("id,room_id,user_id,body,kind,media_url,created_at,edited_at,is_deleted,profiles:profiles!messages_user_id_fkey(id,email,display_name,avatar_url,status)")
       .single();
 
     if (error) throw error;
