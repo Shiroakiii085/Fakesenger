@@ -307,6 +307,13 @@ label {
   color: var(--mint-dark);
   font-size: 12px;
   font-weight: 900;
+  overflow: hidden;
+}
+
+.avatar img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
 }
 
 .avatar-large {
@@ -339,6 +346,17 @@ label {
   border-radius: 8px;
   padding: 12px;
   background: #fbfaf6;
+}
+
+.avatar-editor-row {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 10px;
+}
+
+.avatar-editor-row button {
+  width: 100%;
 }
 
 .account-menu {
@@ -651,9 +669,51 @@ label {
   object-fit: cover;
 }
 
-.message-audio {
-  display: block;
-  width: min(280px, 100%);
+.voice-player {
+  width: min(290px, 100%);
+  display: grid;
+  grid-template-columns: auto minmax(110px, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+}
+
+.voice-player button {
+  width: 34px;
+  height: 34px;
+  border: 0;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  background: var(--mint-dark);
+  color: white;
+}
+
+.message-row.mine .voice-player button {
+  background: white;
+  color: var(--mint-dark);
+}
+
+.voice-player input {
+  width: 100%;
+  min-width: 0;
+  height: 4px;
+  border: 0;
+  border-radius: 999px;
+  padding: 0;
+  background: rgba(16, 126, 99, 0.18);
+  box-shadow: none;
+  accent-color: var(--mint-dark);
+}
+
+.message-row.mine .voice-player input {
+  background: rgba(255, 255, 255, 0.34);
+  accent-color: white;
+}
+
+.voice-player span {
+  min-width: 34px;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
 }
 
 .message-actions {
@@ -925,6 +985,51 @@ label {
   box-shadow: var(--shadow);
 }
 
+.incoming-call-panel {
+  width: min(420px, 100%);
+  min-height: 420px;
+  display: grid;
+  justify-items: center;
+  align-content: center;
+  gap: 12px;
+  border-radius: 8px;
+  padding: 28px;
+  background:
+    linear-gradient(rgba(17, 25, 21, 0.72), rgba(17, 25, 21, 0.88)),
+    rgba(17, 25, 21, 0.96);
+  color: white;
+  box-shadow: var(--shadow);
+}
+
+.incoming-call-panel p,
+.incoming-call-panel h2 {
+  margin: 0;
+}
+
+.incoming-call-panel p {
+  color: rgba(255, 255, 255, 0.72);
+}
+
+.incoming-call-panel h2 {
+  font-size: 27px;
+  text-align: center;
+}
+
+.incoming-call-avatar {
+  width: 112px;
+  height: 112px;
+  flex-basis: 112px;
+  font-size: 30px;
+  background: rgba(219, 234, 221, 0.18);
+  color: white;
+}
+
+.incoming-call-actions {
+  display: flex;
+  gap: 14px;
+  margin-top: 18px;
+}
+
 .remote-video {
   width: 100%;
   height: 100%;
@@ -955,7 +1060,8 @@ label {
   color: white;
 }
 
-.call-controls button {
+.call-controls button,
+.incoming-call-actions button {
   border: 0;
   border-radius: 8px;
   display: inline-flex;

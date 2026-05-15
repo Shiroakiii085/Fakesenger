@@ -10,8 +10,10 @@ import {
   Mic,
   MessageCircle,
   MoreHorizontal,
+  Pause,
   Phone,
   PhoneOff,
+  Play,
   Plus,
   Search,
   Send,
@@ -47,6 +49,14 @@ function initials(name?: string | null) {
     .join("");
 }
 
+function Avatar({ profile, className = "avatar" }: { profile?: Pick<Profile, "display_name" | "avatar_url"> | null; className?: string }) {
+  return (
+    <span className={className}>
+      {profile?.avatar_url ? <img src={profile.avatar_url} alt="" /> : initials(profile?.display_name)}
+    </span>
+  );
+}
+
 function formatTime(value: string) {
   return new Intl.DateTimeFormat("vi-VN", {
     hour: "2-digit",
@@ -54,6 +64,68 @@ function formatTime(value: string) {
     day: "2-digit",
     month: "2-digit"
   }).format(new Date(value));
+}
+
+function formatDuration(value: number) {
+  if (!Number.isFinite(value) || value <= 0) return "0:00";
+  const minutes = Math.floor(value / 60);
+  const seconds = Math.floor(value % 60);
+  return `${minutes}:${seconds.toString().padStart(2, "0")}`;
+}
+
+function VoiceMessagePlayer({ src }: { src: string }) {
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+  const [isPlaying, setIsPlaying] = useState(false);
+  const [duration, setDuration] = useState(0);
+  const [currentTime, setCurrentTime] = useState(0);
+
+  async function togglePlayback() {
+    const audio = audioRef.current;
+    if (!audio) return;
+    if (audio.paused) {
+      await audio.play();
+    } else {
+      audio.pause();
+    }
+  }
+
+  function seek(value: number) {
+    const audio = audioRef.current;
+    if (!audio || !Number.isFinite(value)) return;
+    audio.currentTime = value;
+    setCurrentTime(value);
+  }
+
+  return (
+    <div className="voice-player">
+      <audio
+        ref={audioRef}
+        preload="metadata"
+        src={src}
+        onLoadedMetadata={(event) => setDuration(event.currentTarget.duration || 0)}
+        onTimeUpdate={(event) => setCurrentTime(event.currentTarget.currentTime)}
+        onPlay={() => setIsPlaying(true)}
+        onPause={() => setIsPlaying(false)}
+        onEnded={(event) => {
+          event.currentTarget.currentTime = 0;
+          setIsPlaying(false);
+          setCurrentTime(0);
+        }}
+      />
+      <button type="button" onClick={togglePlayback} title={isPlaying ? "Tam dung" : "Phat"}>
+        {isPlaying ? <Pause size={17} /> : <Play size={17} />}
+      </button>
+      <input
+        type="range"
+        min={0}
+        max={duration || 0}
+        step="0.1"
+        value={Math.min(currentTime, duration || 0)}
+        onChange={(event) => seek(Number(event.target.value))}
+      />
+      <span>{formatDuration(isPlaying ? currentTime : duration || currentTime)}</span>
+    </div>
+  );
 }
 
 function roomIcon(type: RoomType) {
@@ -162,11 +234,13 @@ export function ChatShell() {
   const [isRecordingAudio, setIsRecordingAudio] = useState(false);
   const [callState, setCallState] = useState<"idle" | "calling" | "ringing" | "active">("idle");
   const [incomingOffer, setIncomingOffer] = useState<RTCSessionDescriptionInit | null>(null);
+  const [incomingCaller, setIncomingCaller] = useState<Profile | null>(null);
   const messagesRef = useRef<HTMLDivElement | null>(null);
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
   const messagesLoadIdRef = useRef(0);
   const shouldStickToBottomRef = useRef(true);
   const imageInputRef = useRef<HTMLInputElement | null>(null);
+  const avatarInputRef = useRef<HTMLInputElement | null>(null);
   const recorderRef = useRef<MediaRecorder | null>(null);
   const audioStreamRef = useRef<MediaStream | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
@@ -489,6 +563,9 @@ export function ChatShell() {
         if (payload.from === profile.id) return;
         if (payload.type === "offer") {
           setIncomingOffer(payload.description);
+          setIncomingCaller(
+            activeRoomRef.current?.members.find((member) => member.user_id === payload.from)?.profiles ?? null
+          );
           setCallState("ringing");
           return;
         }
@@ -519,6 +596,15 @@ export function ChatShell() {
       callChannelRef.current = null;
     };
   }, [activeRoom, profile, supabase]);
+
+  useEffect(() => {
+    if (localVideoRef.current && localStreamRef.current) {
+      localVideoRef.current.srcObject = localStreamRef.current;
+    }
+    if (remoteVideoRef.current && remoteStreamRef.current) {
+      remoteVideoRef.current.srcObject = remoteStreamRef.current;
+    }
+  }, [callState]);
 
   useEffect(() => {
     if (!shouldStickToBottomRef.current) return;
@@ -773,6 +859,48 @@ export function ChatShell() {
     await uploadMedia(file, "image");
   }
 
+  async function handleAvatarSelected(event: React.ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file || !profile) return;
+    if (!file.type.startsWith("image/")) {
+      setNotice("Vui long chon tep anh.");
+      return;
+    }
+
+    setIsUploadingMedia(true);
+    try {
+      const extension = file.name.split(".").pop() || "jpg";
+      const path = `avatars/${profile.id}/${Date.now()}-${crypto.randomUUID()}.${extension}`;
+      const { error } = await supabase.storage.from("chat-media").upload(path, file, {
+        cacheControl: "3600",
+        upsert: false,
+        contentType: file.type
+      });
+      if (error) throw error;
+
+      const { data } = supabase.storage.from("chat-media").getPublicUrl(path);
+      const response = await authFetch<{ profile: Profile }>("/api/me", {
+        method: "PATCH",
+        body: { avatarUrl: data.publicUrl }
+      });
+      setProfile(response.profile);
+      setRooms((current) =>
+        current.map((room) => ({
+          ...room,
+          members: room.members.map((member) =>
+            member.user_id === response.profile.id ? { ...member, profiles: response.profile } : member
+          )
+        }))
+      );
+      setNotice("Da cap nhat anh dai dien.");
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "Khong the cap nhat anh dai dien.");
+    } finally {
+      setIsUploadingMedia(false);
+    }
+  }
+
   async function toggleAudioRecording() {
     if (isRecordingAudio) {
       recorderRef.current?.stop();
@@ -781,7 +909,10 @@ export function ChatShell() {
 
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      const recorder = new MediaRecorder(stream);
+      const preferredMimeType = ["audio/webm;codecs=opus", "audio/webm", "audio/mp4"].find((type) =>
+        MediaRecorder.isTypeSupported(type)
+      );
+      const recorder = new MediaRecorder(stream, preferredMimeType ? { mimeType: preferredMimeType } : undefined);
       audioStreamRef.current = stream;
       recorderRef.current = recorder;
       audioChunksRef.current = [];
@@ -795,9 +926,14 @@ export function ChatShell() {
         audioStreamRef.current = null;
         recorderRef.current = null;
         setIsRecordingAudio(false);
-        await uploadMedia(new File([blob], `audio-${Date.now()}.webm`, { type: blob.type }), "audio");
+        if (blob.size === 0) {
+          setNotice("Ban ghi am khong co du lieu.");
+          return;
+        }
+        const extension = blob.type.includes("mp4") ? "m4a" : "webm";
+        await uploadMedia(new File([blob], `audio-${Date.now()}.${extension}`, { type: blob.type }), "audio");
       };
-      recorder.start();
+      recorder.start(250);
       setIsRecordingAudio(true);
     } catch {
       setNotice("Khong the truy cap micro.");
@@ -907,6 +1043,7 @@ export function ChatShell() {
     if (localVideoRef.current) localVideoRef.current.srcObject = null;
     if (remoteVideoRef.current) remoteVideoRef.current.srcObject = null;
     setIncomingOffer(null);
+    setIncomingCaller(null);
     setCallState("idle");
   }
 
@@ -1095,7 +1232,7 @@ export function ChatShell() {
     <main className={`chat-page ${isDetailsOpen && activeRoom && activeRoom.type !== "direct" ? "with-details" : ""}`}>
       <aside className="sidebar">
         <div className="sidebar-top">
-          <div className="avatar avatar-large">{initials(profile.display_name)}</div>
+          <Avatar profile={profile} className="avatar avatar-large" />
           <div>
             <strong>{profile.display_name}</strong>
             <span>{profile.status || "online"}</span>
@@ -1115,6 +1252,21 @@ export function ChatShell() {
               <div className="field-row">
                 <Settings size={16} />
                 <span>Hồ sơ</span>
+              </div>
+              <div className="avatar-editor-row">
+                <Avatar profile={profile} className="avatar avatar-large" />
+                <div>
+                  <input
+                    ref={avatarInputRef}
+                    className="hidden-file-input"
+                    type="file"
+                    accept="image/*"
+                    onChange={handleAvatarSelected}
+                  />
+                  <button type="button" onClick={() => avatarInputRef.current?.click()} disabled={isUploadingMedia}>
+                    Đổi ảnh đại diện
+                  </button>
+                </div>
               </div>
               <input
                 value={profileDraft.displayName}
@@ -1146,7 +1298,7 @@ export function ChatShell() {
           <div className="search-results">
             {searchResults.map((user) => (
               <button key={user.id} type="button" onClick={() => startDirectChat(user.id)}>
-                <span className="avatar">{initials(user.display_name)}</span>
+                <Avatar profile={user} />
                 <span>
                   <strong>{user.display_name}</strong>
                   <small>{user.email}</small>
@@ -1240,7 +1392,7 @@ export function ChatShell() {
                   const pending = isLocalMessage(message);
                   return (
                     <article key={message.id} className={`message-row ${mine ? "mine" : ""} ${pending ? "pending" : ""}`}>
-                      {!mine && <span className="avatar">{initials(message.profiles?.display_name)}</span>}
+                      {!mine && <Avatar profile={message.profiles} />}
                       <div className="bubble">
                         {!mine && <strong>{message.profiles?.display_name || "Thành viên"}</strong>}
                         {message.is_deleted ? (
@@ -1248,7 +1400,7 @@ export function ChatShell() {
                         ) : message.kind === "image" && message.media_url ? (
                           <img className="message-image" src={message.media_url} alt="Anh da gui" />
                         ) : message.kind === "audio" && message.media_url ? (
-                          <audio className="message-audio" controls src={message.media_url} />
+                          <VoiceMessagePlayer src={message.media_url} />
                         ) : (
                           <p>{message.body}</p>
                         )}
@@ -1361,7 +1513,7 @@ export function ChatShell() {
                     disabled={isMemberActionBusy}
                     onClick={() => (isRoomAdmin ? addMemberDirect(user.id) : requestMemberAdd(user.id))}
                   >
-                    <span className="avatar">{initials(user.display_name)}</span>
+                    <Avatar profile={user} />
                     <span>
                       <strong>{user.display_name}</strong>
                       <small>{isRoomAdmin ? "Thêm ngay" : "Gửi yêu cầu duyệt"}</small>
@@ -1381,7 +1533,7 @@ export function ChatShell() {
               {memberRequests.length === 0 && <p className="muted-copy">Chưa có yêu cầu mới.</p>}
               {memberRequests.map((request) => (
                 <div className="request-item" key={request.id}>
-                  <span className="avatar">{initials(request.target?.display_name)}</span>
+                  <Avatar profile={request.target} />
                   <span>
                     <strong>{request.target?.display_name || "Thành viên"}</strong>
                     <small>Đề xuất bởi {request.requester?.display_name || "thành viên"}</small>
@@ -1413,7 +1565,7 @@ export function ChatShell() {
           <div className="member-list">
             {activeRoom.members.map((member: RoomMember) => (
               <div className="member manageable" key={member.user_id}>
-                <span className="avatar">{initials(member.profiles?.display_name)}</span>
+                <Avatar profile={member.profiles} />
                 <span>
                   <strong>{member.profiles?.display_name || "Thành viên"}</strong>
                   <small>{member.role === "admin" ? "Quản trị viên" : member.profiles?.status || "Thành viên"}</small>
@@ -1437,32 +1589,35 @@ export function ChatShell() {
 
       {activeRoom?.type === "direct" && callState !== "idle" && (
         <div className="call-overlay">
-          <section className="call-panel">
-            <video ref={remoteVideoRef} className="remote-video" autoPlay playsInline />
-            <video ref={localVideoRef} className="local-video" autoPlay muted playsInline />
-            <div className="call-controls">
-              {callState === "ringing" ? (
-                <>
-                  <button className="call-accept" type="button" onClick={acceptVideoCall}>
-                    <Phone size={18} />
-                    Nhan cuoc goi
-                  </button>
-                  <button className="call-end" type="button" onClick={() => endCall()}>
-                    <PhoneOff size={18} />
-                    Tu choi
-                  </button>
-                </>
-              ) : (
-                <>
-                  <span>{callState === "calling" ? "Dang goi..." : "Dang goi video"}</span>
-                  <button className="call-end" type="button" onClick={() => endCall()}>
-                    <PhoneOff size={18} />
-                    Ket thuc
-                  </button>
-                </>
-              )}
-            </div>
-          </section>
+          {callState === "ringing" ? (
+            <section className="incoming-call-panel">
+              <Avatar profile={incomingCaller} className="avatar incoming-call-avatar" />
+              <p>Cuộc gọi video đến</p>
+              <h2>{incomingCaller?.display_name || getRoomTitle(activeRoom)}</h2>
+              <div className="incoming-call-actions">
+                <button className="call-end" type="button" onClick={() => endCall()}>
+                  <PhoneOff size={21} />
+                  Từ chối
+                </button>
+                <button className="call-accept" type="button" onClick={acceptVideoCall}>
+                  <Phone size={21} />
+                  Đồng ý
+                </button>
+              </div>
+            </section>
+          ) : (
+            <section className="call-panel">
+              <video ref={remoteVideoRef} className="remote-video" autoPlay playsInline />
+              <video ref={localVideoRef} className="local-video" autoPlay muted playsInline />
+              <div className="call-controls">
+                <span>{callState === "calling" ? "Đang gọi..." : "Đang gọi video"}</span>
+                <button className="call-end" type="button" onClick={() => endCall()}>
+                  <PhoneOff size={18} />
+                  Kết thúc
+                </button>
+              </div>
+            </section>
+          )}
         </div>
       )}
 
@@ -1517,7 +1672,7 @@ export function ChatShell() {
             <div className="candidate-list">
               {searchResults.map((user) => (
                 <button key={user.id} type="button" onClick={() => toggleSelectedUser(user)}>
-                  <span className="avatar">{initials(user.display_name)}</span>
+                  <Avatar profile={user} />
                   <span>
                     <strong>{user.display_name}</strong>
                     <small>{selectedUsers.some((item) => item.id === user.id) ? "Đã chọn" : user.email}</small>
