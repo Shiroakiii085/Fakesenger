@@ -565,6 +565,7 @@ label {
 }
 
 .bubble {
+  position: relative;
   border: 1px solid var(--line);
   border-radius: 8px;
   padding: 10px 12px;
@@ -637,6 +638,74 @@ label {
   overflow-wrap: anywhere;
 }
 
+.deleted-message {
+  color: var(--muted);
+  font-style: italic;
+}
+
+.message-image {
+  display: block;
+  width: min(320px, 100%);
+  max-height: 320px;
+  border-radius: 8px;
+  object-fit: cover;
+}
+
+.message-audio {
+  display: block;
+  width: min(280px, 100%);
+}
+
+.message-actions {
+  position: absolute;
+  top: 7px;
+  right: 7px;
+}
+
+.message-actions > button {
+  width: 26px;
+  height: 26px;
+  border: 0;
+  border-radius: 8px;
+  display: grid;
+  place-items: center;
+  color: var(--muted);
+  background: rgba(255, 255, 255, 0.88);
+}
+
+.message-row.mine .message-actions > button {
+  color: white;
+  background: rgba(255, 255, 255, 0.16);
+}
+
+.message-menu {
+  position: absolute;
+  z-index: 3;
+  top: 31px;
+  right: 0;
+  width: 160px;
+  display: grid;
+  gap: 4px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 6px;
+  background: #fffdfa;
+  box-shadow: var(--shadow);
+}
+
+.message-menu button {
+  border: 0;
+  border-radius: 8px;
+  padding: 9px;
+  background: transparent;
+  color: var(--ink);
+  text-align: left;
+}
+
+.message-menu button:hover {
+  background: var(--sage);
+}
+
 .bubble time {
   display: block;
   margin-top: 6px;
@@ -650,11 +719,27 @@ label {
 
 .composer {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-columns: auto auto minmax(0, 1fr) auto;
   gap: 10px;
   padding: 16px 20px 20px;
   border-top: 1px solid var(--line);
   background: rgba(255, 255, 255, 0.76);
+}
+
+.hidden-file-input {
+  display: none;
+}
+
+.composer-tool {
+  width: 48px;
+  height: 48px;
+  align-self: center;
+}
+
+.composer-tool.recording {
+  border-color: rgba(239, 111, 108, 0.4);
+  color: white;
+  background: var(--coral);
 }
 
 .composer input {
@@ -818,6 +903,75 @@ label {
   box-shadow: var(--shadow);
   padding: 12px 14px;
   font-weight: 750;
+}
+
+.call-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 12;
+  display: grid;
+  place-items: center;
+  padding: 20px;
+  background: rgba(23, 33, 29, 0.72);
+}
+
+.call-panel {
+  position: relative;
+  width: min(760px, 100%);
+  aspect-ratio: 16 / 10;
+  overflow: hidden;
+  border-radius: 8px;
+  background: #111915;
+  box-shadow: var(--shadow);
+}
+
+.remote-video {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.local-video {
+  position: absolute;
+  top: 16px;
+  right: 16px;
+  width: min(190px, 28%);
+  aspect-ratio: 4 / 3;
+  border: 2px solid rgba(255, 255, 255, 0.72);
+  border-radius: 8px;
+  background: #0d120f;
+  object-fit: cover;
+}
+
+.call-controls {
+  position: absolute;
+  right: 16px;
+  bottom: 16px;
+  left: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  color: white;
+}
+
+.call-controls button {
+  border: 0;
+  border-radius: 8px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 11px 14px;
+  color: white;
+  font-weight: 800;
+}
+
+.call-accept {
+  background: var(--mint-dark);
+}
+
+.call-end {
+  background: var(--coral);
 }
 
 @media (max-width: 1040px) {

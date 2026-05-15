@@ -54,9 +54,18 @@ create table if not exists public.messages (
   room_id uuid not null references public.rooms(id) on delete cascade,
   user_id uuid not null references public.profiles(id) on delete cascade,
   body text not null check (char_length(body) between 1 and 2000),
+  kind text not null default 'text' check (kind in ('text', 'image', 'audio')),
+  media_url text,
   is_deleted boolean not null default false,
   created_at timestamptz not null default now(),
   edited_at timestamptz
+);
+
+create table if not exists public.message_hides (
+  message_id uuid not null references public.messages(id) on delete cascade,
+  user_id uuid not null references public.profiles(id) on delete cascade,
+  hidden_at timestamptz not null default now(),
+  primary key (message_id, user_id)
 );
 
 create table if not exists public.member_requests (
@@ -74,6 +83,7 @@ create table if not exists public.member_requests (
 create index if not exists idx_room_members_user_id on public.room_members(user_id);
 create index if not exists idx_room_members_room_id on public.room_members(room_id);
 create index if not exists idx_messages_room_created on public.messages(room_id, created_at);
+create index if not exists idx_message_hides_user_id on public.message_hides(user_id);
 create index if not exists idx_member_requests_room_status on public.member_requests(room_id, status, created_at);
 create unique index if not exists idx_member_requests_pending_unique
 on public.member_requests(room_id, target_user_id)
@@ -171,6 +181,7 @@ alter table public.profiles enable row level security;
 alter table public.rooms enable row level security;
 alter table public.room_members enable row level security;
 alter table public.messages enable row level security;
+alter table public.message_hides enable row level security;
 alter table public.member_requests enable row level security;
 
 drop policy if exists "profiles are visible to authenticated users" on public.profiles;
@@ -253,6 +264,25 @@ with check (
     or public.is_room_admin(room_id, auth.uid())
   )
 );
+
+drop policy if exists "senders can update own messages" on public.messages;
+create policy "senders can update own messages"
+on public.messages for update
+to authenticated
+using (user_id = auth.uid())
+with check (user_id = auth.uid());
+
+drop policy if exists "users can read own hidden messages" on public.message_hides;
+create policy "users can read own hidden messages"
+on public.message_hides for select
+to authenticated
+using (user_id = auth.uid());
+
+drop policy if exists "users can hide own messages" on public.message_hides;
+create policy "users can hide own messages"
+on public.message_hides for insert
+to authenticated
+with check (user_id = auth.uid());
 
 drop policy if exists "members can read member requests" on public.member_requests;
 create policy "members can read member requests"

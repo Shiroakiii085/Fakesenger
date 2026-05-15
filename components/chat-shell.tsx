@@ -5,14 +5,20 @@ import {
   Hash,
   Check,
   Clock,
+  Image as ImageIcon,
   LogOut,
+  Mic,
   MessageCircle,
+  MoreHorizontal,
+  Phone,
+  PhoneOff,
   Plus,
   Search,
   Send,
   Settings,
   Shield,
   UserMinus,
+  Video,
   Users,
   X
 } from "lucide-react";
@@ -151,10 +157,26 @@ export function ChatShell() {
   const [memberSearchResults, setMemberSearchResults] = useState<Profile[]>([]);
   const [memberRequests, setMemberRequests] = useState<MemberRequest[]>([]);
   const [isMemberActionBusy, setIsMemberActionBusy] = useState(false);
+  const [openMessageMenuId, setOpenMessageMenuId] = useState<string | null>(null);
+  const [isUploadingMedia, setIsUploadingMedia] = useState(false);
+  const [isRecordingAudio, setIsRecordingAudio] = useState(false);
+  const [callState, setCallState] = useState<"idle" | "calling" | "ringing" | "active">("idle");
+  const [incomingOffer, setIncomingOffer] = useState<RTCSessionDescriptionInit | null>(null);
   const messagesRef = useRef<HTMLDivElement | null>(null);
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
   const messagesLoadIdRef = useRef(0);
   const shouldStickToBottomRef = useRef(true);
+  const imageInputRef = useRef<HTMLInputElement | null>(null);
+  const recorderRef = useRef<MediaRecorder | null>(null);
+  const audioStreamRef = useRef<MediaStream | null>(null);
+  const audioChunksRef = useRef<Blob[]>([]);
+  const callChannelRef = useRef<ReturnType<typeof supabase.channel> | null>(null);
+  const peerConnectionRef = useRef<RTCPeerConnection | null>(null);
+  const localStreamRef = useRef<MediaStream | null>(null);
+  const remoteStreamRef = useRef<MediaStream | null>(null);
+  const localVideoRef = useRef<HTMLVideoElement | null>(null);
+  const remoteVideoRef = useRef<HTMLVideoElement | null>(null);
+  const pendingIceCandidatesRef = useRef<RTCIceCandidateInit[]>([]);
   const sessionRef = useRef<Session | null>(null);
   const roomsRef = useRef<Room[]>([]);
   const activeRoomRef = useRef<Room | null>(null);
@@ -441,12 +463,62 @@ export function ChatShell() {
           setMessages((current) => upsertServerMessage(current, { ...row, profiles: sender }));
         }
       )
+      .on(
+        "postgres_changes",
+        { event: "UPDATE", schema: "public", table: "messages", filter: `room_id=eq.${activeRoomId}` },
+        (payload) => {
+          const row = payload.new as Omit<Message, "profiles">;
+          setMessages((current) =>
+            current.map((message) => (message.id === row.id ? { ...message, ...row } : message))
+          );
+        }
+      )
       .subscribe();
 
     return () => {
       supabase.removeChannel(channel);
     };
   }, [activeRoomId, isSupabaseConfigured, loadMessages, supabase]);
+
+  useEffect(() => {
+    if (!activeRoom || activeRoom.type !== "direct" || !profile) return;
+
+    const channel = supabase
+      .channel(`call-${activeRoom.id}`, { config: { broadcast: { self: false } } })
+      .on("broadcast", { event: "signal" }, async ({ payload }) => {
+        if (payload.from === profile.id) return;
+        if (payload.type === "offer") {
+          setIncomingOffer(payload.description);
+          setCallState("ringing");
+          return;
+        }
+        if (payload.type === "answer" && peerConnectionRef.current) {
+          await peerConnectionRef.current.setRemoteDescription(payload.description);
+          await flushPendingIceCandidates();
+          setCallState("active");
+          return;
+        }
+        if (payload.type === "ice") {
+          if (peerConnectionRef.current?.remoteDescription) {
+            await peerConnectionRef.current.addIceCandidate(payload.candidate);
+          } else {
+            pendingIceCandidatesRef.current.push(payload.candidate);
+          }
+          return;
+        }
+        if (payload.type === "hangup") {
+          endCall(false);
+        }
+      })
+      .subscribe();
+
+    callChannelRef.current = channel;
+    return () => {
+      endCall(false);
+      supabase.removeChannel(channel);
+      callChannelRef.current = null;
+    };
+  }, [activeRoom, profile, supabase]);
 
   useEffect(() => {
     if (!shouldStickToBottomRef.current) return;
@@ -631,6 +703,8 @@ export function ChatShell() {
       room_id: activeRoom.id,
       user_id: profile.id,
       body,
+      kind: "text",
+      media_url: null,
       created_at: new Date().toISOString(),
       edited_at: null,
       is_deleted: false,
@@ -656,6 +730,184 @@ export function ChatShell() {
       setMessageDraft(body);
       setNotice(error instanceof Error ? error.message : "Không thể gửi tin nhắn.");
     }
+  }
+
+  async function uploadMedia(file: File, kind: "image" | "audio") {
+    if (!activeRoom || !profile) return;
+    setIsUploadingMedia(true);
+    try {
+      const extension = file.name.split(".").pop() || (kind === "image" ? "jpg" : "webm");
+      const path = `${activeRoom.id}/${profile.id}/${Date.now()}-${crypto.randomUUID()}.${extension}`;
+      const { error } = await supabase.storage.from("chat-media").upload(path, file, {
+        cacheControl: "3600",
+        upsert: false,
+        contentType: file.type
+      });
+      if (error) throw error;
+
+      const { data } = supabase.storage.from("chat-media").getPublicUrl(path);
+      const response = await authFetch<{ message: Message }>(`/api/rooms/${activeRoom.id}/messages`, {
+        method: "POST",
+        body: {
+          body: kind === "image" ? "Anh" : "Tin nhan am thanh",
+          kind,
+          mediaUrl: data.publicUrl
+        }
+      });
+      setMessages((current) => upsertServerMessage(current, response.message));
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "Khong the gui tep.");
+    } finally {
+      setIsUploadingMedia(false);
+    }
+  }
+
+  async function handleImageSelected(event: React.ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file) return;
+    if (!file.type.startsWith("image/")) {
+      setNotice("Vui long chon tep anh.");
+      return;
+    }
+    await uploadMedia(file, "image");
+  }
+
+  async function toggleAudioRecording() {
+    if (isRecordingAudio) {
+      recorderRef.current?.stop();
+      return;
+    }
+
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const recorder = new MediaRecorder(stream);
+      audioStreamRef.current = stream;
+      recorderRef.current = recorder;
+      audioChunksRef.current = [];
+      recorder.ondataavailable = (event) => {
+        if (event.data.size > 0) audioChunksRef.current.push(event.data);
+      };
+      recorder.onstop = async () => {
+        const blob = new Blob(audioChunksRef.current, { type: recorder.mimeType || "audio/webm" });
+        audioChunksRef.current = [];
+        audioStreamRef.current?.getTracks().forEach((track) => track.stop());
+        audioStreamRef.current = null;
+        recorderRef.current = null;
+        setIsRecordingAudio(false);
+        await uploadMedia(new File([blob], `audio-${Date.now()}.webm`, { type: blob.type }), "audio");
+      };
+      recorder.start();
+      setIsRecordingAudio(true);
+    } catch {
+      setNotice("Khong the truy cap micro.");
+    }
+  }
+
+  async function removeMessage(messageId: string, scope: "self" | "everyone") {
+    try {
+      await authFetch(`/api/messages/${messageId}?scope=${scope}`, { method: "DELETE" });
+      if (scope === "self") {
+        setMessages((current) => current.filter((message) => message.id !== messageId));
+      } else {
+        setMessages((current) =>
+          current.map((message) =>
+            message.id === messageId
+              ? { ...message, body: "Tin nhan da duoc go", media_url: null, is_deleted: true, edited_at: new Date().toISOString() }
+              : message
+          )
+        );
+      }
+      setOpenMessageMenuId(null);
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "Khong the go tin nhan.");
+    }
+  }
+
+  async function sendCallSignal(payload: Record<string, unknown>) {
+    await callChannelRef.current?.send({
+      type: "broadcast",
+      event: "signal",
+      payload: { ...payload, from: profile?.id }
+    });
+  }
+
+  async function createPeerConnection() {
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: true });
+    localStreamRef.current = stream;
+    if (localVideoRef.current) localVideoRef.current.srcObject = stream;
+
+    const peerConnection = new RTCPeerConnection({
+      iceServers: [{ urls: "stun:stun.l.google.com:19302" }]
+    });
+    peerConnectionRef.current = peerConnection;
+    remoteStreamRef.current = new MediaStream();
+    if (remoteVideoRef.current) remoteVideoRef.current.srcObject = remoteStreamRef.current;
+
+    stream.getTracks().forEach((track) => peerConnection.addTrack(track, stream));
+    peerConnection.ontrack = (event) => {
+      event.streams[0]?.getTracks().forEach((track) => remoteStreamRef.current?.addTrack(track));
+      if (remoteVideoRef.current) remoteVideoRef.current.srcObject = remoteStreamRef.current;
+    };
+    peerConnection.onicecandidate = (event) => {
+      if (event.candidate) {
+        sendCallSignal({ type: "ice", candidate: event.candidate.toJSON() }).catch(() => undefined);
+      }
+    };
+    return peerConnection;
+  }
+
+  async function flushPendingIceCandidates() {
+    const peerConnection = peerConnectionRef.current;
+    if (!peerConnection) return;
+    for (const candidate of pendingIceCandidatesRef.current) {
+      await peerConnection.addIceCandidate(candidate);
+    }
+    pendingIceCandidatesRef.current = [];
+  }
+
+  async function startVideoCall() {
+    try {
+      const peerConnection = await createPeerConnection();
+      const offer = await peerConnection.createOffer();
+      await peerConnection.setLocalDescription(offer);
+      setCallState("calling");
+      await sendCallSignal({ type: "offer", description: offer });
+    } catch {
+      setNotice("Khong the bat dau cuoc goi video.");
+      endCall(false);
+    }
+  }
+
+  async function acceptVideoCall() {
+    if (!incomingOffer) return;
+    try {
+      const peerConnection = await createPeerConnection();
+      await peerConnection.setRemoteDescription(incomingOffer);
+      await flushPendingIceCandidates();
+      const answer = await peerConnection.createAnswer();
+      await peerConnection.setLocalDescription(answer);
+      setIncomingOffer(null);
+      setCallState("active");
+      await sendCallSignal({ type: "answer", description: answer });
+    } catch {
+      setNotice("Khong the nhan cuoc goi.");
+      endCall(false);
+    }
+  }
+
+  function endCall(notify = true) {
+    if (notify) sendCallSignal({ type: "hangup" }).catch(() => undefined);
+    peerConnectionRef.current?.close();
+    peerConnectionRef.current = null;
+    localStreamRef.current?.getTracks().forEach((track) => track.stop());
+    localStreamRef.current = null;
+    remoteStreamRef.current = null;
+    pendingIceCandidatesRef.current = [];
+    if (localVideoRef.current) localVideoRef.current.srcObject = null;
+    if (remoteVideoRef.current) remoteVideoRef.current.srcObject = null;
+    setIncomingOffer(null);
+    setCallState("idle");
   }
 
   async function saveProfile() {
@@ -964,6 +1216,11 @@ export function ChatShell() {
                     <Settings size={18} />
                   </button>
                 )}
+                {activeRoom.type === "direct" && (
+                  <button className="icon-button" type="button" title="Goi video" onClick={startVideoCall}>
+                    <Video size={18} />
+                  </button>
+                )}
               </div>
             </header>
 
@@ -986,11 +1243,42 @@ export function ChatShell() {
                       {!mine && <span className="avatar">{initials(message.profiles?.display_name)}</span>}
                       <div className="bubble">
                         {!mine && <strong>{message.profiles?.display_name || "Thành viên"}</strong>}
-                        <p>{message.body}</p>
-                        <time>{pending ? "Đang gửi" : formatTime(message.created_at)}</time>
-                      </div>
-                    </article>
-                  );
+                        {message.is_deleted ? (
+                          <p className="deleted-message">Tin nhan da duoc go</p>
+                        ) : message.kind === "image" && message.media_url ? (
+                          <img className="message-image" src={message.media_url} alt="Anh da gui" />
+                        ) : message.kind === "audio" && message.media_url ? (
+                          <audio className="message-audio" controls src={message.media_url} />
+                        ) : (
+                          <p>{message.body}</p>
+                        )}
+                      <time>{pending ? "Đang gửi" : formatTime(message.created_at)}</time>
+                      {!pending && !message.is_deleted && (
+                        <div className="message-actions">
+                          <button
+                            type="button"
+                            title="Tuy chon"
+                            onClick={() => setOpenMessageMenuId((current) => (current === message.id ? null : message.id))}
+                          >
+                            <MoreHorizontal size={16} />
+                          </button>
+                          {openMessageMenuId === message.id && (
+                            <div className="message-menu">
+                              <button type="button" onClick={() => removeMessage(message.id, "self")}>
+                                Go khoi ban than
+                              </button>
+                              {mine && (
+                                <button type="button" onClick={() => removeMessage(message.id, "everyone")}>
+                                  Go voi moi nguoi
+                                </button>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  </article>
+                );
                 })}
               {!isMessagesLoading && messages.length === 0 && (
                 <div className="empty-conversation">
@@ -1003,6 +1291,25 @@ export function ChatShell() {
             </div>
 
             <form className="composer" onSubmit={sendMessage}>
+              <input ref={imageInputRef} className="hidden-file-input" type="file" accept="image/*" onChange={handleImageSelected} />
+              <button
+                className="icon-button composer-tool"
+                type="button"
+                title="Gui anh"
+                onClick={() => imageInputRef.current?.click()}
+                disabled={!canSend || isUploadingMedia}
+              >
+                <ImageIcon size={18} />
+              </button>
+              <button
+                className={`icon-button composer-tool ${isRecordingAudio ? "recording" : ""}`}
+                type="button"
+                title={isRecordingAudio ? "Dung ghi am" : "Ghi am"}
+                onClick={toggleAudioRecording}
+                disabled={!canSend || isUploadingMedia}
+              >
+                <Mic size={18} />
+              </button>
               <input
                 value={messageDraft}
                 onChange={(event) => setMessageDraft(event.target.value)}
@@ -1126,6 +1433,37 @@ export function ChatShell() {
             ))}
           </div>
         </aside>
+      )}
+
+      {activeRoom?.type === "direct" && callState !== "idle" && (
+        <div className="call-overlay">
+          <section className="call-panel">
+            <video ref={remoteVideoRef} className="remote-video" autoPlay playsInline />
+            <video ref={localVideoRef} className="local-video" autoPlay muted playsInline />
+            <div className="call-controls">
+              {callState === "ringing" ? (
+                <>
+                  <button className="call-accept" type="button" onClick={acceptVideoCall}>
+                    <Phone size={18} />
+                    Nhan cuoc goi
+                  </button>
+                  <button className="call-end" type="button" onClick={() => endCall()}>
+                    <PhoneOff size={18} />
+                    Tu choi
+                  </button>
+                </>
+              ) : (
+                <>
+                  <span>{callState === "calling" ? "Dang goi..." : "Dang goi video"}</span>
+                  <button className="call-end" type="button" onClick={() => endCall()}>
+                    <PhoneOff size={18} />
+                    Ket thuc
+                  </button>
+                </>
+              )}
+            </div>
+          </section>
+        </div>
       )}
 
       {isRoomComposerOpen && (
