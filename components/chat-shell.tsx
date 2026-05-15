@@ -7,6 +7,7 @@ import {
   Clock,
   Image as ImageIcon,
   LogOut,
+  Menu,
   Mic,
   MessageCircle,
   MoreHorizontal,
@@ -229,6 +230,7 @@ export function ChatShell() {
   const [memberSearchResults, setMemberSearchResults] = useState<Profile[]>([]);
   const [memberRequests, setMemberRequests] = useState<MemberRequest[]>([]);
   const [isMemberActionBusy, setIsMemberActionBusy] = useState(false);
+  const [isMobileRoomsOpen, setIsMobileRoomsOpen] = useState(false);
   const [openMessageMenuId, setOpenMessageMenuId] = useState<string | null>(null);
   const [isUploadingMedia, setIsUploadingMedia] = useState(false);
   const [isRecordingAudio, setIsRecordingAudio] = useState(false);
@@ -628,6 +630,7 @@ export function ChatShell() {
     setMemberSearchQuery("");
     setMemberSearchResults([]);
     setMemberRequests([]);
+    setIsMobileRoomsOpen(false);
   }, [activeRoomId]);
 
   useEffect(() => {
@@ -739,6 +742,7 @@ export function ChatShell() {
       });
       await loadRooms();
       setActiveRoomId(data.room.id);
+      setIsMobileRoomsOpen(false);
       setSearchQuery("");
       setSearchResults([]);
     } catch (error) {
@@ -773,6 +777,7 @@ export function ChatShell() {
       setIsRoomComposerOpen(false);
       await loadRooms();
       setActiveRoomId(data.room.id);
+      setIsMobileRoomsOpen(false);
     } catch (error) {
       setNotice(error instanceof Error ? error.message : "Không thể tạo phòng.");
     }
@@ -908,9 +913,19 @@ export function ChatShell() {
     }
 
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      const preferredMimeType = ["audio/webm;codecs=opus", "audio/webm", "audio/mp4"].find((type) =>
-        MediaRecorder.isTypeSupported(type)
+      if (!navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === "undefined") {
+        setNotice("Trinh duyet nay chua ho tro ghi am. Hay mo bang Chrome hoac Safari moi nhat.");
+        return;
+      }
+
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: {
+          echoCancellation: true,
+          noiseSuppression: true
+        }
+      });
+      const preferredMimeType = ["audio/mp4;codecs=mp4a.40.2", "audio/mp4", "audio/webm;codecs=opus", "audio/webm"].find(
+        (type) => MediaRecorder.isTypeSupported(type)
       );
       const recorder = new MediaRecorder(stream, preferredMimeType ? { mimeType: preferredMimeType } : undefined);
       audioStreamRef.current = stream;
@@ -969,7 +984,19 @@ export function ChatShell() {
   }
 
   async function createPeerConnection() {
-    const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: true });
+    if (!navigator.mediaDevices?.getUserMedia) {
+      throw new Error("Trinh duyet nay chua ho tro camera/micro.");
+    }
+
+    const stream = await navigator.mediaDevices.getUserMedia({
+      audio: {
+        echoCancellation: true,
+        noiseSuppression: true
+      },
+      video: {
+        facingMode: "user"
+      }
+    });
     localStreamRef.current = stream;
     if (localVideoRef.current) localVideoRef.current.srcObject = stream;
 
@@ -1009,8 +1036,8 @@ export function ChatShell() {
       await peerConnection.setLocalDescription(offer);
       setCallState("calling");
       await sendCallSignal({ type: "offer", description: offer });
-    } catch {
-      setNotice("Khong the bat dau cuoc goi video.");
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "Khong the bat dau cuoc goi video.");
       endCall(false);
     }
   }
@@ -1229,7 +1256,11 @@ export function ChatShell() {
   }
 
   return (
-    <main className={`chat-page ${isDetailsOpen && activeRoom && activeRoom.type !== "direct" ? "with-details" : ""}`}>
+    <main
+      className={`chat-page ${isDetailsOpen && activeRoom && activeRoom.type !== "direct" ? "with-details" : ""} ${
+        isMobileRoomsOpen || !activeRoom ? "mobile-rooms-open" : ""
+      }`}
+    >
       <aside className="sidebar">
         <div className="sidebar-top">
           <Avatar profile={profile} className="avatar avatar-large" />
@@ -1321,7 +1352,10 @@ export function ChatShell() {
               key={room.id}
               type="button"
               className={`room-item ${room.id === activeRoomId ? "selected" : ""}`}
-              onClick={() => setActiveRoomId(room.id)}
+              onClick={() => {
+                setActiveRoomId(room.id);
+                setIsMobileRoomsOpen(false);
+              }}
             >
               <span className="room-symbol">{roomIcon(room.type)}</span>
               <span className="room-meta">
@@ -1345,6 +1379,14 @@ export function ChatShell() {
           <>
             <header className="conversation-header">
               <div className="header-title">
+                <button
+                  className="icon-button mobile-room-toggle"
+                  type="button"
+                  title="Danh sach phong"
+                  onClick={() => setIsMobileRoomsOpen(true)}
+                >
+                  <Menu size={18} />
+                </button>
                 <span className="room-symbol large">{roomIcon(activeRoom.type)}</span>
                 <div>
                   <h2>{getRoomTitle(activeRoom)}</h2>
