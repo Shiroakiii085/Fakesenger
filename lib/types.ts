@@ -33,8 +33,10 @@ export type Message = {
   room_id: string;
   user_id: string;
   body: string;
-  kind: "text" | "image" | "audio";
+  kind: "text" | "image" | "audio" | "call";
   media_url: string | null;
+  call_status: "ringing" | "active" | "completed" | "missed" | "rejected" | null;
+  call_duration_seconds: number | null;
   created_at: string;
   edited_at: string | null;
   is_deleted: boolean;

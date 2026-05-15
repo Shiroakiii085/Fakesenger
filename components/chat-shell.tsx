@@ -74,6 +74,16 @@ function formatDuration(value: number) {
   return `${minutes}:${seconds.toString().padStart(2, "0")}`;
 }
 
+function getCallSummary(message: Message) {
+  if (message.call_status === "completed") {
+    return `Cuộc gọi video - ${formatDuration(message.call_duration_seconds ?? 0)}`;
+  }
+  if (message.call_status === "rejected") return "Cuộc gọi video đã bị từ chối";
+  if (message.call_status === "missed") return "Cuộc gọi video nhỡ";
+  if (message.call_status === "active") return "Cuộc gọi video đang diễn ra";
+  return "Đã bắt đầu cuộc gọi video";
+}
+
 function VoiceMessagePlayer({ src }: { src: string }) {
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const [isPlaying, setIsPlaying] = useState(false);
@@ -238,6 +248,7 @@ export function ChatShell() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [isMessagesLoading, setIsMessagesLoading] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
+  const [roomSearchQuery, setRoomSearchQuery] = useState("");
   const [searchResults, setSearchResults] = useState<Profile[]>([]);
   const [messageDraft, setMessageDraft] = useState("");
   const [authMode, setAuthMode] = useState<"login" | "signup">("login");
@@ -263,6 +274,9 @@ export function ChatShell() {
   const [isRecordingAudio, setIsRecordingAudio] = useState(false);
   const [callState, setCallState] = useState<"idle" | "calling" | "ringing" | "active">("idle");
   const [incomingCaller, setIncomingCaller] = useState<Profile | null>(null);
+  const [callRoomId, setCallRoomId] = useState<string | null>(null);
+  const [callMessageId, setCallMessageId] = useState<string | null>(null);
+  const [callStartedAt, setCallStartedAt] = useState<number | null>(null);
   const [localCallStream, setLocalCallStream] = useState<MediaStream | null>(null);
   const [remoteCallPeers, setRemoteCallPeers] = useState<Array<{ userId: string; profile: Profile | null; stream: MediaStream }>>([]);
   const messagesRef = useRef<HTMLDivElement | null>(null);
@@ -274,12 +288,13 @@ export function ChatShell() {
   const recorderRef = useRef<MediaRecorder | null>(null);
   const audioStreamRef = useRef<MediaStream | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
-  const callChannelRef = useRef<ReturnType<typeof supabase.channel> | null>(null);
+  const callChannelsRef = useRef(new Map<string, ReturnType<typeof supabase.channel>>());
   const peerConnectionsRef = useRef(new Map<string, RTCPeerConnection>());
   const localStreamRef = useRef<MediaStream | null>(null);
   const pendingIceCandidatesRef = useRef(new Map<string, RTCIceCandidateInit[]>());
   const sessionRef = useRef<Session | null>(null);
   const roomsRef = useRef<Room[]>([]);
+  const callRoomIdRef = useRef<string | null>(null);
   const activeRoomRef = useRef<Room | null>(null);
   const bootstrappedUserIdRef = useRef<string | null>(null);
   const isSigningUpRef = useRef(false);
@@ -287,6 +302,11 @@ export function ChatShell() {
   const activeRoom = useMemo(
     () => rooms.find((room) => room.id === activeRoomId) ?? null,
     [rooms, activeRoomId]
+  );
+
+  const callRoom = useMemo(
+    () => rooms.find((room) => room.id === callRoomId) ?? null,
+    [rooms, callRoomId]
   );
 
   const currentMember = useMemo(
@@ -304,6 +324,10 @@ export function ChatShell() {
   useEffect(() => {
     roomsRef.current = rooms;
   }, [rooms]);
+
+  useEffect(() => {
+    callRoomIdRef.current = callRoomId;
+  }, [callRoomId]);
 
   useEffect(() => {
     activeRoomRef.current = activeRoom;
@@ -356,6 +380,16 @@ export function ChatShell() {
     },
     [profile?.id]
   );
+
+  const visibleRooms = useMemo(() => {
+    const query = roomSearchQuery.trim().toLocaleLowerCase("vi-VN");
+    if (!query) return rooms;
+    return rooms.filter((room) => {
+      const title = getRoomTitle(room).toLocaleLowerCase("vi-VN");
+      const subtitle = getRoomSubtitle(room).toLocaleLowerCase("vi-VN");
+      return title.includes(query) || subtitle.includes(query);
+    });
+  }, [getRoomSubtitle, getRoomTitle, roomSearchQuery, rooms]);
 
   const loadRooms = useCallback(async () => {
     if (!sessionRef.current?.access_token) return;
@@ -582,69 +616,95 @@ export function ChatShell() {
   }, [activeRoomId, isSupabaseConfigured, loadMessages, supabase]);
 
   useEffect(() => {
-    if (!activeRoom || activeRoom.type === "channel" || !profile) return;
+    if (!profile) return;
 
-    const channel = supabase
-      .channel(`call-${activeRoom.id}`, { config: { broadcast: { self: false } } })
-      .on("broadcast", { event: "signal" }, async ({ payload }) => {
-        if (payload.from === profile.id) return;
-        if (payload.to && payload.to !== profile.id) return;
+    const callableRooms = rooms.filter((room) => room.type !== "channel");
+    const nextRoomIds = new Set(callableRooms.map((room) => room.id));
 
-        if (payload.type === "invite") {
-          setIncomingCaller(
-            activeRoomRef.current?.members.find((member) => member.user_id === payload.from)?.profiles ?? null
-          );
-          setCallState("ringing");
-          return;
-        }
+    for (const [roomId, channel] of callChannelsRef.current) {
+      if (!nextRoomIds.has(roomId)) {
+        supabase.removeChannel(channel);
+        callChannelsRef.current.delete(roomId);
+      }
+    }
 
-        if (payload.type === "join" && localStreamRef.current) {
-          await createOfferForPeer(String(payload.from));
-          setCallState("active");
-          return;
-        }
+    for (const room of callableRooms) {
+      if (callChannelsRef.current.has(room.id)) continue;
+      const channel = supabase
+        .channel(`call-${room.id}`, { config: { broadcast: { self: false } } })
+        .on("broadcast", { event: "signal" }, async ({ payload }) => {
+          if (payload.from === profile.id) return;
+          if (payload.to && payload.to !== profile.id) return;
 
-        if (payload.type === "offer") {
-          await acceptOfferFromPeer(String(payload.from), payload.description);
-          return;
-        }
-
-        if (payload.type === "answer") {
-          const peerConnection = peerConnectionsRef.current.get(String(payload.from));
-          if (!peerConnection) return;
-          await peerConnection.setRemoteDescription(payload.description);
-          await flushPendingIceCandidates(String(payload.from));
-          setCallState("active");
-          return;
-        }
-
-        if (payload.type === "ice") {
-          const peerId = String(payload.from);
-          const peerConnection = peerConnectionsRef.current.get(peerId);
-          if (peerConnection?.remoteDescription) {
-            await peerConnection.addIceCandidate(payload.candidate);
-          } else {
-            const pending = pendingIceCandidatesRef.current.get(peerId) ?? [];
-            pending.push(payload.candidate);
-            pendingIceCandidatesRef.current.set(peerId, pending);
+          if (payload.type === "invite") {
+            setCallRoomId(room.id);
+            setCallMessageId(typeof payload.callMessageId === "string" ? payload.callMessageId : null);
+            setIncomingCaller(room.members.find((member) => member.user_id === payload.from)?.profiles ?? null);
+            setCallState("ringing");
+            return;
           }
-          return;
-        }
 
-        if (payload.type === "leave") {
-          removePeer(String(payload.from));
-          if (activeRoomRef.current?.type === "direct") endCall(false);
-        }
-      })
-      .subscribe();
+          if (payload.type === "join" && localStreamRef.current && callRoomIdRef.current === room.id) {
+            await createOfferForPeer(String(payload.from));
+            setCallStartedAt((current) => current ?? Date.now());
+            setCallState("active");
+            await updateCallHistory("active");
+            return;
+          }
 
-    callChannelRef.current = channel;
+          if (payload.type === "reject" && callRoomIdRef.current === room.id) {
+            await updateCallHistory("rejected");
+            endCall(false);
+            return;
+          }
+
+          if (payload.type === "offer" && callRoomIdRef.current === room.id) {
+            await acceptOfferFromPeer(String(payload.from), payload.description);
+            return;
+          }
+
+          if (payload.type === "answer" && callRoomIdRef.current === room.id) {
+            const peerConnection = peerConnectionsRef.current.get(String(payload.from));
+            if (!peerConnection) return;
+            await peerConnection.setRemoteDescription(payload.description);
+            await flushPendingIceCandidates(String(payload.from));
+            setCallState("active");
+            return;
+          }
+
+          if (payload.type === "ice" && callRoomIdRef.current === room.id) {
+            const peerId = String(payload.from);
+            const peerConnection = peerConnectionsRef.current.get(peerId);
+            if (peerConnection?.remoteDescription) {
+              await peerConnection.addIceCandidate(payload.candidate);
+            } else {
+              const pending = pendingIceCandidatesRef.current.get(peerId) ?? [];
+              pending.push(payload.candidate);
+              pendingIceCandidatesRef.current.set(peerId, pending);
+            }
+            return;
+          }
+
+          if (payload.type === "leave" && callRoomIdRef.current === room.id) {
+            removePeer(String(payload.from));
+            if (!localStreamRef.current) {
+              endCall(false);
+            } else if (room.type === "direct") {
+              await updateCallHistory("completed");
+              endCall(false);
+            }
+          }
+        })
+        .subscribe();
+
+      callChannelsRef.current.set(room.id, channel);
+    }
+
     return () => {
-      endCall(false);
-      supabase.removeChannel(channel);
-      callChannelRef.current = null;
+      callChannelsRef.current.forEach((channel) => supabase.removeChannel(channel));
+      callChannelsRef.current.clear();
     };
-  }, [activeRoom, profile, supabase]);
+  }, [profile, rooms, supabase]);
 
   useEffect(() => {
     if (!shouldStickToBottomRef.current) return;
@@ -855,6 +915,8 @@ export function ChatShell() {
       body,
       kind: "text",
       media_url: null,
+      call_status: null,
+      call_duration_seconds: null,
       created_at: new Date().toISOString(),
       edited_at: null,
       is_deleted: false,
@@ -1035,11 +1097,26 @@ export function ChatShell() {
   }
 
   async function sendCallSignal(payload: Record<string, unknown>) {
-    await callChannelRef.current?.send({
+    const roomId = callRoomIdRef.current;
+    if (!roomId) return;
+    await callChannelsRef.current.get(roomId)?.send({
       type: "broadcast",
       event: "signal",
       payload: { ...payload, from: profile?.id }
     });
+  }
+
+  async function updateCallHistory(status: NonNullable<Message["call_status"]>) {
+    if (!callMessageId || !profile) return;
+    const durationSeconds = callStartedAt ? Math.max(0, Math.round((Date.now() - callStartedAt) / 1000)) : null;
+    try {
+      await authFetch(`/api/messages/${callMessageId}`, {
+        method: "PATCH",
+        body: { status, durationSeconds }
+      });
+    } catch {
+      // Only the caller owns the call history record; receivers can ignore forbidden updates.
+    }
   }
 
   async function ensureLocalCallStream() {
@@ -1075,7 +1152,8 @@ export function ChatShell() {
     stream.getTracks().forEach((track) => peerConnection.addTrack(track, stream));
     peerConnection.ontrack = (event) => {
       event.streams[0]?.getTracks().forEach((track) => remoteStream.addTrack(track));
-      const peerProfile = activeRoomRef.current?.members.find((member) => member.user_id === peerId)?.profiles ?? null;
+      const room = roomsRef.current.find((item) => item.id === callRoomIdRef.current);
+      const peerProfile = room?.members.find((member) => member.user_id === peerId)?.profiles ?? null;
       setRemoteCallPeers((current) => {
         const nextPeer = { userId: peerId, profile: peerProfile, stream: remoteStream };
         return current.some((peer) => peer.userId === peerId)
@@ -1118,10 +1196,22 @@ export function ChatShell() {
   }
 
   async function startVideoCall() {
+    if (!activeRoom || activeRoom.type === "channel") return;
     try {
+      setCallRoomId(activeRoom.id);
+      callRoomIdRef.current = activeRoom.id;
       await ensureLocalCallStream();
+      const response = await authFetch<{ message: Message }>(`/api/rooms/${activeRoom.id}/messages`, {
+        method: "POST",
+        body: {
+          body: "Cuoc goi video",
+          kind: "call",
+          callStatus: "ringing"
+        }
+      });
+      setCallMessageId(response.message.id);
       setCallState("calling");
-      await sendCallSignal({ type: "invite" });
+      await sendCallSignal({ type: "invite", callMessageId: response.message.id });
     } catch (error) {
       setNotice(error instanceof Error ? error.message : "Khong the bat dau cuoc goi video.");
       endCall(false);
@@ -1131,6 +1221,7 @@ export function ChatShell() {
   async function acceptVideoCall() {
     try {
       await ensureLocalCallStream();
+      setCallStartedAt(Date.now());
       setCallState("active");
       await sendCallSignal({ type: "join" });
     } catch {
@@ -1147,6 +1238,11 @@ export function ChatShell() {
   }
 
   function endCall(notify = true) {
+    if (notify && callState === "active") {
+      updateCallHistory("completed").catch(() => undefined);
+    } else if (notify && callState === "calling") {
+      updateCallHistory("missed").catch(() => undefined);
+    }
     if (notify) sendCallSignal({ type: "leave" }).catch(() => undefined);
     peerConnectionsRef.current.forEach((peerConnection) => peerConnection.close());
     peerConnectionsRef.current.clear();
@@ -1156,7 +1252,16 @@ export function ChatShell() {
     setLocalCallStream(null);
     setRemoteCallPeers([]);
     setIncomingCaller(null);
+    setCallRoomId(null);
+    callRoomIdRef.current = null;
+    setCallMessageId(null);
+    setCallStartedAt(null);
     setCallState("idle");
+  }
+
+  async function declineVideoCall() {
+    await sendCallSignal({ type: "reject" });
+    endCall(false);
   }
 
   async function saveProfile() {
@@ -1461,8 +1566,17 @@ export function ChatShell() {
           </button>
         </div>
 
+        <div className="search-box room-search-box">
+          <Search size={17} />
+          <input
+            value={roomSearchQuery}
+            onChange={(event) => setRoomSearchQuery(event.target.value)}
+            placeholder="Tìm cuộc trò chuyện"
+          />
+        </div>
+
         <div className="room-list">
-          {rooms.map((room) => (
+          {visibleRooms.map((room) => (
             <button
               key={room.id}
               type="button"
@@ -1480,10 +1594,10 @@ export function ChatShell() {
             </button>
           ))}
 
-          {rooms.length === 0 && (
+          {visibleRooms.length === 0 && (
             <div className="empty-state">
               <Users size={24} />
-              <p>Tìm người để chat 1:1 hoặc tạo nhóm/kênh mới.</p>
+              <p>{rooms.length === 0 ? "Tìm người để chat 1:1 hoặc tạo nhóm/kênh mới." : "Không tìm thấy cuộc trò chuyện."}</p>
             </div>
           )}
         </div>
@@ -1559,6 +1673,11 @@ export function ChatShell() {
                           <img className="message-image" src={message.media_url} alt="Anh da gui" />
                         ) : message.kind === "audio" && message.media_url ? (
                           <VoiceMessagePlayer src={message.media_url} />
+                        ) : message.kind === "call" ? (
+                          <div className={`call-message ${message.call_status ?? ""}`}>
+                            <Video size={17} />
+                            <span>{getCallSummary(message)}</span>
+                          </div>
                         ) : (
                           <p>{message.body}</p>
                         )}
@@ -1757,15 +1876,15 @@ export function ChatShell() {
         </aside>
       )}
 
-      {activeRoom && activeRoom.type !== "channel" && callState !== "idle" && (
+      {callRoom && callRoom.type !== "channel" && callState !== "idle" && (
         <div className="call-overlay">
           {callState === "ringing" ? (
             <section className="incoming-call-panel">
               <Avatar profile={incomingCaller} className="avatar incoming-call-avatar" />
               <p>Cuộc gọi video đến</p>
-              <h2>{incomingCaller?.display_name || getRoomTitle(activeRoom)}</h2>
+              <h2>{incomingCaller?.display_name || getRoomTitle(callRoom)}</h2>
               <div className="incoming-call-actions">
-                <button className="call-end" type="button" onClick={() => endCall()}>
+                <button className="call-end" type="button" onClick={declineVideoCall}>
                   <PhoneOff size={21} />
                   Từ chối
                 </button>

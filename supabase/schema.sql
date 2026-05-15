@@ -54,8 +54,10 @@ create table if not exists public.messages (
   room_id uuid not null references public.rooms(id) on delete cascade,
   user_id uuid not null references public.profiles(id) on delete cascade,
   body text not null check (char_length(body) between 1 and 2000),
-  kind text not null default 'text' check (kind in ('text', 'image', 'audio')),
+  kind text not null default 'text' check (kind in ('text', 'image', 'audio', 'call')),
   media_url text,
+  call_status text check (call_status in ('ringing', 'active', 'completed', 'missed', 'rejected')),
+  call_duration_seconds integer check (call_duration_seconds is null or call_duration_seconds >= 0),
   is_deleted boolean not null default false,
   created_at timestamptz not null default now(),
   edited_at timestamptz

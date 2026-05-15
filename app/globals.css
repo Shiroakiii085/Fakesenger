@@ -484,12 +484,15 @@ label {
 .room-list {
   flex: 1 1 auto;
   min-height: 0;
+  align-content: start;
+  grid-auto-rows: max-content;
   overflow: auto;
   padding-right: 2px;
   overscroll-behavior: contain;
 }
 
 .room-item {
+  min-height: 58px;
   border-color: transparent;
   background: transparent;
 }
@@ -738,6 +741,23 @@ label {
   min-width: 34px;
   font-size: 12px;
   font-variant-numeric: tabular-nums;
+}
+
+.call-message {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 750;
+}
+
+.call-message.missed,
+.call-message.rejected {
+  color: var(--coral);
+}
+
+.message-row.mine .call-message.missed,
+.message-row.mine .call-message.rejected {
+  color: rgba(255, 255, 255, 0.82);
 }
 
 .message-actions {

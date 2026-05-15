@@ -11,7 +11,7 @@ export async function GET(request: Request, context: { params: Promise<{ roomId:
 
     const { data, error } = await supabase
       .from("messages")
-      .select("id,room_id,user_id,body,kind,media_url,created_at,edited_at,is_deleted,profiles:profiles!messages_user_id_fkey(id,email,display_name,avatar_url,status)")
+      .select("id,room_id,user_id,body,kind,media_url,call_status,call_duration_seconds,created_at,edited_at,is_deleted,profiles:profiles!messages_user_id_fkey(id,email,display_name,avatar_url,status)")
       .eq("room_id", roomId)
       .order("created_at", { ascending: true })
       .limit(200);
@@ -28,15 +28,23 @@ export async function POST(request: Request, context: { params: Promise<{ roomId
     const { supabase, user } = await getRouteContext(request);
     const { roomId } = await context.params;
     const body = await request.json();
-    const kind = body.kind === "image" || body.kind === "audio" ? body.kind : "text";
+    const kind = body.kind === "image" || body.kind === "audio" || body.kind === "call" ? body.kind : "text";
     const message = String(body.body ?? "").trim();
     const mediaUrl = typeof body.mediaUrl === "string" ? body.mediaUrl.trim() : null;
+    const callStatus =
+      body.callStatus === "ringing" ||
+      body.callStatus === "active" ||
+      body.callStatus === "completed" ||
+      body.callStatus === "missed" ||
+      body.callStatus === "rejected"
+        ? body.callStatus
+        : null;
 
     if (!message && kind === "text") {
       return json({ error: "Tin nhan khong duoc de trong" }, { status: 400 });
     }
     if (kind !== "text" && !mediaUrl) {
-      return json({ error: "Thieu tep dinh kem" }, { status: 400 });
+      if (kind !== "call") return json({ error: "Thieu tep dinh kem" }, { status: 400 });
     }
 
     const { data, error } = await supabase
@@ -44,11 +52,12 @@ export async function POST(request: Request, context: { params: Promise<{ roomId
       .insert({
         room_id: roomId,
         user_id: user.id,
-        body: message.slice(0, 2000) || (kind === "image" ? "Anh" : "Tin nhan am thanh"),
+        body: message.slice(0, 2000) || (kind === "image" ? "Anh" : kind === "audio" ? "Tin nhan am thanh" : "Cuoc goi video"),
         kind,
-        media_url: mediaUrl
+        media_url: mediaUrl,
+        call_status: callStatus
       })
-      .select("id,room_id,user_id,body,kind,media_url,created_at,edited_at,is_deleted,profiles:profiles!messages_user_id_fkey(id,email,display_name,avatar_url,status)")
+      .select("id,room_id,user_id,body,kind,media_url,call_status,call_duration_seconds,created_at,edited_at,is_deleted,profiles:profiles!messages_user_id_fkey(id,email,display_name,avatar_url,status)")
       .single();
 
     if (error) throw error;
