@@ -151,8 +151,10 @@ export function ChatShell() {
   const [memberSearchResults, setMemberSearchResults] = useState<Profile[]>([]);
   const [memberRequests, setMemberRequests] = useState<MemberRequest[]>([]);
   const [isMemberActionBusy, setIsMemberActionBusy] = useState(false);
+  const messagesRef = useRef<HTMLDivElement | null>(null);
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
   const messagesLoadIdRef = useRef(0);
+  const shouldStickToBottomRef = useRef(true);
   const sessionRef = useRef<Session | null>(null);
   const roomsRef = useRef<Room[]>([]);
   const activeRoomRef = useRef<Room | null>(null);
@@ -447,8 +449,21 @@ export function ChatShell() {
   }, [activeRoomId, isSupabaseConfigured, loadMessages, supabase]);
 
   useEffect(() => {
+    if (!shouldStickToBottomRef.current) return;
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages.length, activeRoomId]);
+  }, [messages.length]);
+
+  useEffect(() => {
+    shouldStickToBottomRef.current = true;
+    messagesEndRef.current?.scrollIntoView({ behavior: "auto" });
+  }, [activeRoomId]);
+
+  function handleMessagesScroll() {
+    const element = messagesRef.current;
+    if (!element) return;
+    const distanceFromBottom = element.scrollHeight - element.scrollTop - element.clientHeight;
+    shouldStickToBottomRef.current = distanceFromBottom < 80;
+  }
 
   useEffect(() => {
     setIsDetailsOpen(false);
@@ -952,7 +967,7 @@ export function ChatShell() {
               </div>
             </header>
 
-            <div className="messages">
+            <div className="messages" ref={messagesRef} onScroll={handleMessagesScroll}>
               {isMessagesLoading && (
                 <div className="message-loading" aria-label="Đang tải tin nhắn">
                   <span className="loading-line short" />
