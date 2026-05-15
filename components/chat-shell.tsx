@@ -129,6 +129,33 @@ function VoiceMessagePlayer({ src }: { src: string }) {
   );
 }
 
+function CallVideoTile({
+  stream,
+  muted = false,
+  label,
+  className = ""
+}: {
+  stream: MediaStream | null;
+  muted?: boolean;
+  label: string;
+  className?: string;
+}) {
+  const videoRef = useRef<HTMLVideoElement | null>(null);
+
+  useEffect(() => {
+    if (videoRef.current) {
+      videoRef.current.srcObject = stream;
+    }
+  }, [stream]);
+
+  return (
+    <div className={`call-video-tile ${className}`.trim()}>
+      <video ref={videoRef} autoPlay playsInline muted={muted} />
+      <span>{label}</span>
+    </div>
+  );
+}
+
 function roomIcon(type: RoomType) {
   if (type === "channel") return <Bell size={17} />;
   if (type === "group") return <Hash size={17} />;
@@ -235,8 +262,9 @@ export function ChatShell() {
   const [isUploadingMedia, setIsUploadingMedia] = useState(false);
   const [isRecordingAudio, setIsRecordingAudio] = useState(false);
   const [callState, setCallState] = useState<"idle" | "calling" | "ringing" | "active">("idle");
-  const [incomingOffer, setIncomingOffer] = useState<RTCSessionDescriptionInit | null>(null);
   const [incomingCaller, setIncomingCaller] = useState<Profile | null>(null);
+  const [localCallStream, setLocalCallStream] = useState<MediaStream | null>(null);
+  const [remoteCallPeers, setRemoteCallPeers] = useState<Array<{ userId: string; profile: Profile | null; stream: MediaStream }>>([]);
   const messagesRef = useRef<HTMLDivElement | null>(null);
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
   const messagesLoadIdRef = useRef(0);
@@ -247,12 +275,9 @@ export function ChatShell() {
   const audioStreamRef = useRef<MediaStream | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
   const callChannelRef = useRef<ReturnType<typeof supabase.channel> | null>(null);
-  const peerConnectionRef = useRef<RTCPeerConnection | null>(null);
+  const peerConnectionsRef = useRef(new Map<string, RTCPeerConnection>());
   const localStreamRef = useRef<MediaStream | null>(null);
-  const remoteStreamRef = useRef<MediaStream | null>(null);
-  const localVideoRef = useRef<HTMLVideoElement | null>(null);
-  const remoteVideoRef = useRef<HTMLVideoElement | null>(null);
-  const pendingIceCandidatesRef = useRef<RTCIceCandidateInit[]>([]);
+  const pendingIceCandidatesRef = useRef(new Map<string, RTCIceCandidateInit[]>());
   const sessionRef = useRef<Session | null>(null);
   const roomsRef = useRef<Room[]>([]);
   const activeRoomRef = useRef<Room | null>(null);
@@ -557,36 +582,58 @@ export function ChatShell() {
   }, [activeRoomId, isSupabaseConfigured, loadMessages, supabase]);
 
   useEffect(() => {
-    if (!activeRoom || activeRoom.type !== "direct" || !profile) return;
+    if (!activeRoom || activeRoom.type === "channel" || !profile) return;
 
     const channel = supabase
       .channel(`call-${activeRoom.id}`, { config: { broadcast: { self: false } } })
       .on("broadcast", { event: "signal" }, async ({ payload }) => {
         if (payload.from === profile.id) return;
-        if (payload.type === "offer") {
-          setIncomingOffer(payload.description);
+        if (payload.to && payload.to !== profile.id) return;
+
+        if (payload.type === "invite") {
           setIncomingCaller(
             activeRoomRef.current?.members.find((member) => member.user_id === payload.from)?.profiles ?? null
           );
           setCallState("ringing");
           return;
         }
-        if (payload.type === "answer" && peerConnectionRef.current) {
-          await peerConnectionRef.current.setRemoteDescription(payload.description);
-          await flushPendingIceCandidates();
+
+        if (payload.type === "join" && localStreamRef.current) {
+          await createOfferForPeer(String(payload.from));
           setCallState("active");
           return;
         }
+
+        if (payload.type === "offer") {
+          await acceptOfferFromPeer(String(payload.from), payload.description);
+          return;
+        }
+
+        if (payload.type === "answer") {
+          const peerConnection = peerConnectionsRef.current.get(String(payload.from));
+          if (!peerConnection) return;
+          await peerConnection.setRemoteDescription(payload.description);
+          await flushPendingIceCandidates(String(payload.from));
+          setCallState("active");
+          return;
+        }
+
         if (payload.type === "ice") {
-          if (peerConnectionRef.current?.remoteDescription) {
-            await peerConnectionRef.current.addIceCandidate(payload.candidate);
+          const peerId = String(payload.from);
+          const peerConnection = peerConnectionsRef.current.get(peerId);
+          if (peerConnection?.remoteDescription) {
+            await peerConnection.addIceCandidate(payload.candidate);
           } else {
-            pendingIceCandidatesRef.current.push(payload.candidate);
+            const pending = pendingIceCandidatesRef.current.get(peerId) ?? [];
+            pending.push(payload.candidate);
+            pendingIceCandidatesRef.current.set(peerId, pending);
           }
           return;
         }
-        if (payload.type === "hangup") {
-          endCall(false);
+
+        if (payload.type === "leave") {
+          removePeer(String(payload.from));
+          if (activeRoomRef.current?.type === "direct") endCall(false);
         }
       })
       .subscribe();
@@ -598,15 +645,6 @@ export function ChatShell() {
       callChannelRef.current = null;
     };
   }, [activeRoom, profile, supabase]);
-
-  useEffect(() => {
-    if (localVideoRef.current && localStreamRef.current) {
-      localVideoRef.current.srcObject = localStreamRef.current;
-    }
-    if (remoteVideoRef.current && remoteStreamRef.current) {
-      remoteVideoRef.current.srcObject = remoteStreamRef.current;
-    }
-  }, [callState]);
 
   useEffect(() => {
     if (!shouldStickToBottomRef.current) return;
@@ -654,11 +692,32 @@ export function ChatShell() {
   }, [authFetch, searchQuery, session]);
 
   useEffect(() => {
-    if (!isDetailsOpen || !activeRoom || activeRoom.type === "direct") return;
+    if (!activeRoom || activeRoom.type === "direct" || !isRoomAdmin) return;
     loadMemberRequests(activeRoom.id).catch((error) => {
       if (!shouldIgnoreBackgroundError(error)) setNotice(error.message);
     });
-  }, [activeRoom?.id, activeRoom?.type, isDetailsOpen, loadMemberRequests]);
+  }, [activeRoom?.id, activeRoom?.type, isRoomAdmin, loadMemberRequests]);
+
+  useEffect(() => {
+    if (!activeRoom || activeRoom.type === "direct" || !isRoomAdmin) return;
+
+    const channel = supabase
+      .channel(`member-requests-${activeRoom.id}`)
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "member_requests", filter: `room_id=eq.${activeRoom.id}` },
+        () => {
+          loadMemberRequests(activeRoom.id).catch((error) => {
+            if (!shouldIgnoreBackgroundError(error)) setNotice(error.message);
+          });
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [activeRoom, isRoomAdmin, loadMemberRequests, supabase]);
 
   useEffect(() => {
     const timeout = window.setTimeout(async () => {
@@ -983,7 +1042,8 @@ export function ChatShell() {
     });
   }
 
-  async function createPeerConnection() {
+  async function ensureLocalCallStream() {
+    if (localStreamRef.current) return localStreamRef.current;
     if (!navigator.mediaDevices?.getUserMedia) {
       throw new Error("Trinh duyet nay chua ho tro camera/micro.");
     }
@@ -998,44 +1058,70 @@ export function ChatShell() {
       }
     });
     localStreamRef.current = stream;
-    if (localVideoRef.current) localVideoRef.current.srcObject = stream;
+    setLocalCallStream(stream);
+    return stream;
+  }
 
+  async function createPeerConnection(peerId: string) {
+    const existing = peerConnectionsRef.current.get(peerId);
+    if (existing) return existing;
+    const stream = await ensureLocalCallStream();
     const peerConnection = new RTCPeerConnection({
       iceServers: [{ urls: "stun:stun.l.google.com:19302" }]
     });
-    peerConnectionRef.current = peerConnection;
-    remoteStreamRef.current = new MediaStream();
-    if (remoteVideoRef.current) remoteVideoRef.current.srcObject = remoteStreamRef.current;
+    peerConnectionsRef.current.set(peerId, peerConnection);
+    const remoteStream = new MediaStream();
 
     stream.getTracks().forEach((track) => peerConnection.addTrack(track, stream));
     peerConnection.ontrack = (event) => {
-      event.streams[0]?.getTracks().forEach((track) => remoteStreamRef.current?.addTrack(track));
-      if (remoteVideoRef.current) remoteVideoRef.current.srcObject = remoteStreamRef.current;
+      event.streams[0]?.getTracks().forEach((track) => remoteStream.addTrack(track));
+      const peerProfile = activeRoomRef.current?.members.find((member) => member.user_id === peerId)?.profiles ?? null;
+      setRemoteCallPeers((current) => {
+        const nextPeer = { userId: peerId, profile: peerProfile, stream: remoteStream };
+        return current.some((peer) => peer.userId === peerId)
+          ? current.map((peer) => (peer.userId === peerId ? nextPeer : peer))
+          : [...current, nextPeer];
+      });
     };
     peerConnection.onicecandidate = (event) => {
       if (event.candidate) {
-        sendCallSignal({ type: "ice", candidate: event.candidate.toJSON() }).catch(() => undefined);
+        sendCallSignal({ type: "ice", to: peerId, candidate: event.candidate.toJSON() }).catch(() => undefined);
       }
     };
     return peerConnection;
   }
 
-  async function flushPendingIceCandidates() {
-    const peerConnection = peerConnectionRef.current;
+  async function flushPendingIceCandidates(peerId: string) {
+    const peerConnection = peerConnectionsRef.current.get(peerId);
     if (!peerConnection) return;
-    for (const candidate of pendingIceCandidatesRef.current) {
+    for (const candidate of pendingIceCandidatesRef.current.get(peerId) ?? []) {
       await peerConnection.addIceCandidate(candidate);
     }
-    pendingIceCandidatesRef.current = [];
+    pendingIceCandidatesRef.current.delete(peerId);
+  }
+
+  async function createOfferForPeer(peerId: string) {
+    const peerConnection = await createPeerConnection(peerId);
+    const offer = await peerConnection.createOffer();
+    await peerConnection.setLocalDescription(offer);
+    await sendCallSignal({ type: "offer", to: peerId, description: offer });
+  }
+
+  async function acceptOfferFromPeer(peerId: string, description: RTCSessionDescriptionInit) {
+    const peerConnection = await createPeerConnection(peerId);
+    await peerConnection.setRemoteDescription(description);
+    await flushPendingIceCandidates(peerId);
+    const answer = await peerConnection.createAnswer();
+    await peerConnection.setLocalDescription(answer);
+    setCallState("active");
+    await sendCallSignal({ type: "answer", to: peerId, description: answer });
   }
 
   async function startVideoCall() {
     try {
-      const peerConnection = await createPeerConnection();
-      const offer = await peerConnection.createOffer();
-      await peerConnection.setLocalDescription(offer);
+      await ensureLocalCallStream();
       setCallState("calling");
-      await sendCallSignal({ type: "offer", description: offer });
+      await sendCallSignal({ type: "invite" });
     } catch (error) {
       setNotice(error instanceof Error ? error.message : "Khong the bat dau cuoc goi video.");
       endCall(false);
@@ -1043,33 +1129,32 @@ export function ChatShell() {
   }
 
   async function acceptVideoCall() {
-    if (!incomingOffer) return;
     try {
-      const peerConnection = await createPeerConnection();
-      await peerConnection.setRemoteDescription(incomingOffer);
-      await flushPendingIceCandidates();
-      const answer = await peerConnection.createAnswer();
-      await peerConnection.setLocalDescription(answer);
-      setIncomingOffer(null);
+      await ensureLocalCallStream();
       setCallState("active");
-      await sendCallSignal({ type: "answer", description: answer });
+      await sendCallSignal({ type: "join" });
     } catch {
       setNotice("Khong the nhan cuoc goi.");
       endCall(false);
     }
   }
 
+  function removePeer(peerId: string) {
+    peerConnectionsRef.current.get(peerId)?.close();
+    peerConnectionsRef.current.delete(peerId);
+    pendingIceCandidatesRef.current.delete(peerId);
+    setRemoteCallPeers((current) => current.filter((peer) => peer.userId !== peerId));
+  }
+
   function endCall(notify = true) {
-    if (notify) sendCallSignal({ type: "hangup" }).catch(() => undefined);
-    peerConnectionRef.current?.close();
-    peerConnectionRef.current = null;
+    if (notify) sendCallSignal({ type: "leave" }).catch(() => undefined);
+    peerConnectionsRef.current.forEach((peerConnection) => peerConnection.close());
+    peerConnectionsRef.current.clear();
     localStreamRef.current?.getTracks().forEach((track) => track.stop());
     localStreamRef.current = null;
-    remoteStreamRef.current = null;
-    pendingIceCandidatesRef.current = [];
-    if (localVideoRef.current) localVideoRef.current.srcObject = null;
-    if (remoteVideoRef.current) remoteVideoRef.current.srcObject = null;
-    setIncomingOffer(null);
+    pendingIceCandidatesRef.current.clear();
+    setLocalCallStream(null);
+    setRemoteCallPeers([]);
     setIncomingCaller(null);
     setCallState("idle");
   }
@@ -1172,6 +1257,36 @@ export function ChatShell() {
       setNotice(error instanceof Error ? error.message : "Không thể xử lý yêu cầu.");
     } finally {
       setIsMemberActionBusy(false);
+    }
+  }
+
+  async function clearAllMessages() {
+    if (!activeRoom || !window.confirm("Bạn có chắc chắn muốn xoá toàn bộ tin nhắn trong đoạn chat này không? Hành động này không thể hoàn tác.")) {
+      return;
+    }
+
+    try {
+      await authFetch(`/api/rooms/${activeRoom.id}/messages`, { method: "DELETE" });
+      setMessages([]);
+      setNotice("Đã xoá toàn bộ tin nhắn.");
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "Không thể xoá toàn bộ tin nhắn.");
+    }
+  }
+
+  async function deleteRoom() {
+    if (!activeRoom || !window.confirm("Bạn có chắc chắn muốn xoá phòng chat này không? Toàn bộ tin nhắn sẽ bị xoá khỏi cơ sở dữ liệu.")) {
+      return;
+    }
+
+    try {
+      await authFetch(`/api/rooms/${activeRoom.id}`, { method: "DELETE" });
+      setMessages([]);
+      await loadRooms();
+      setIsDetailsOpen(false);
+      setNotice("Đã xoá phòng chat.");
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "Không thể xoá phòng chat.");
     }
   }
 
@@ -1402,15 +1517,16 @@ export function ChatShell() {
                 )}
                 {activeRoom.type !== "direct" && (
                   <button
-                    className={`icon-button ${isDetailsOpen ? "dark" : ""}`}
+                    className={`icon-button settings-button ${isDetailsOpen ? "dark" : ""}`}
                     type="button"
                     title="Cài đặt nhóm"
                     onClick={() => setIsDetailsOpen((open) => !open)}
                   >
                     <Settings size={18} />
+                    {isRoomAdmin && memberRequests.length > 0 && <span>{memberRequests.length}</span>}
                   </button>
                 )}
-                {activeRoom.type === "direct" && (
+                {activeRoom.type !== "channel" && (
                   <button className="icon-button" type="button" title="Goi video" onClick={startVideoCall}>
                     <Video size={18} />
                   </button>
@@ -1626,10 +1742,22 @@ export function ChatShell() {
               </div>
             ))}
           </div>
+
+          {isRoomAdmin && (
+            <div className="danger-zone">
+              <h3>Quản lý dữ liệu</h3>
+              <button type="button" onClick={clearAllMessages}>
+                Xoá toàn bộ tin nhắn
+              </button>
+              <button type="button" onClick={deleteRoom}>
+                Xoá phòng chat
+              </button>
+            </div>
+          )}
         </aside>
       )}
 
-      {activeRoom?.type === "direct" && callState !== "idle" && (
+      {activeRoom && activeRoom.type !== "channel" && callState !== "idle" && (
         <div className="call-overlay">
           {callState === "ringing" ? (
             <section className="incoming-call-panel">
@@ -1649,10 +1777,18 @@ export function ChatShell() {
             </section>
           ) : (
             <section className="call-panel">
-              <video ref={remoteVideoRef} className="remote-video" autoPlay playsInline />
-              <video ref={localVideoRef} className="local-video" autoPlay muted playsInline />
+              <div className="call-grid">
+                <CallVideoTile stream={localCallStream} muted label="Bạn" className="local" />
+                {remoteCallPeers.map((peer) => (
+                  <CallVideoTile
+                    key={peer.userId}
+                    stream={peer.stream}
+                    label={peer.profile?.display_name || "Thành viên"}
+                  />
+                ))}
+              </div>
               <div className="call-controls">
-                <span>{callState === "calling" ? "Đang gọi..." : "Đang gọi video"}</span>
+                <span>{callState === "calling" ? "Đang gọi..." : `Đang gọi video (${remoteCallPeers.length + 1})`}</span>
                 <button className="call-end" type="button" onClick={() => endCall()}>
                   <PhoneOff size={18} />
                   Kết thúc

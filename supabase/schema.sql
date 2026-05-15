@@ -222,6 +222,12 @@ to authenticated
 using (public.is_room_admin(id, auth.uid()))
 with check (public.is_room_admin(id, auth.uid()));
 
+drop policy if exists "admins can delete rooms" on public.rooms;
+create policy "admins can delete rooms"
+on public.rooms for delete
+to authenticated
+using (public.is_room_admin(id, auth.uid()));
+
 drop policy if exists "members can read room members" on public.room_members;
 create policy "members can read room members"
 on public.room_members for select
@@ -271,6 +277,12 @@ on public.messages for update
 to authenticated
 using (user_id = auth.uid())
 with check (user_id = auth.uid());
+
+drop policy if exists "admins can delete room messages" on public.messages;
+create policy "admins can delete room messages"
+on public.messages for delete
+to authenticated
+using (public.is_room_admin(room_id, auth.uid()));
 
 drop policy if exists "users can read own hidden messages" on public.message_hides;
 create policy "users can read own hidden messages"

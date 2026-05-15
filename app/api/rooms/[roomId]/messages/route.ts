@@ -57,3 +57,27 @@ export async function POST(request: Request, context: { params: Promise<{ roomId
     return errorJson(error);
   }
 }
+
+export async function DELETE(request: Request, context: { params: Promise<{ roomId: string }> }) {
+  try {
+    const { supabase, user } = await getRouteContext(request);
+    const { roomId } = await context.params;
+
+    const memberResult = await supabase
+      .from("room_members")
+      .select("role")
+      .eq("room_id", roomId)
+      .eq("user_id", user.id)
+      .maybeSingle();
+    if (memberResult.error) throw memberResult.error;
+    if (memberResult.data?.role !== "admin") {
+      return json({ error: "Chi quan tri vien moi co the xoa toan bo tin nhan." }, { status: 403 });
+    }
+
+    const { error } = await supabase.from("messages").delete().eq("room_id", roomId);
+    if (error) throw error;
+    return json({ ok: true });
+  } catch (error) {
+    return errorJson(error);
+  }
+}
