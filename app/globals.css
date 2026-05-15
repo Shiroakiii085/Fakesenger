@@ -1051,9 +1051,11 @@ label {
 .call-panel {
   position: relative;
   width: min(760px, 100%);
-  aspect-ratio: 16 / 10;
+  height: min(680px, calc(100dvh - 40px));
   overflow: hidden;
   border-radius: 8px;
+  display: grid;
+  grid-template-rows: minmax(0, 1fr) auto;
   background: #111915;
   box-shadow: var(--shadow);
 }
@@ -1107,9 +1109,23 @@ label {
   width: 100%;
   height: 100%;
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 2px;
   background: rgba(255, 255, 255, 0.12);
+}
+
+.call-grid[data-count="1"] {
+  grid-template-columns: 1fr;
+}
+
+.call-grid[data-count="3"],
+.call-grid[data-count="4"] {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.call-grid[data-count="5"],
+.call-grid[data-count="6"] {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
 }
 
 .call-video-tile {
@@ -1137,15 +1153,14 @@ label {
 }
 
 .call-controls {
-  position: absolute;
-  right: 16px;
-  bottom: 16px;
-  left: 16px;
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 12px;
+  min-height: 74px;
+  padding: 14px 16px;
   color: white;
+  background: rgba(17, 25, 21, 0.96);
 }
 
 .call-controls button,
@@ -1274,11 +1289,22 @@ label {
 
   .call-panel {
     width: 100%;
-    min-height: min(520px, calc(100dvh - 24px));
-    aspect-ratio: auto;
+    height: calc(100dvh - 24px);
   }
 
   .call-grid {
     grid-template-columns: 1fr;
+  }
+
+  .call-grid[data-count="3"],
+  .call-grid[data-count="4"],
+  .call-grid[data-count="5"],
+  .call-grid[data-count="6"] {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .call-controls {
+    min-height: 76px;
+    padding-bottom: calc(14px + env(safe-area-inset-bottom));
   }
 }

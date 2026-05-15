@@ -83,6 +83,21 @@ function getCallSummary(message: Message) {
   return "Đã bắt đầu cuộc gọi video";
 }
 
+function mediaAccessErrorMessage(error: unknown) {
+  if (error instanceof DOMException) {
+    if (error.name === "NotAllowedError") {
+      return "Chrome trên iPhone đang chặn camera hoặc micro. Hãy cho phép quyền Camera/Micro trong Cài đặt rồi thử lại.";
+    }
+    if (error.name === "NotFoundError") {
+      return "Không tìm thấy camera hoặc micro trên thiết bị này.";
+    }
+    if (error.name === "OverconstrainedError") {
+      return "Thiết bị không hỗ trợ cấu hình camera đang yêu cầu. Hãy thử lại.";
+    }
+  }
+  return error instanceof Error ? error.message : "Không thể truy cập camera hoặc micro.";
+}
+
 function VoiceMessagePlayer({ src }: { src: string }) {
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const [isPlaying, setIsPlaying] = useState(false);
@@ -1269,7 +1284,7 @@ export function ChatShell() {
       setCallState("calling");
       await sendCallSignal({ type: "invite", callMessageId: response.message.id });
     } catch (error) {
-      setNotice(error instanceof Error ? error.message : "Khong the bat dau cuoc goi video.");
+      setNotice(mediaAccessErrorMessage(error));
       endCall(false);
     }
   }
@@ -1280,8 +1295,8 @@ export function ChatShell() {
       setCallStartedAt(Date.now());
       setCallState("active");
       await sendCallSignal({ type: "join" });
-    } catch {
-      setNotice("Khong the nhan cuoc goi.");
+    } catch (error) {
+      setNotice(mediaAccessErrorMessage(error));
       endCall(false);
     }
   }
@@ -1989,7 +2004,7 @@ export function ChatShell() {
             </section>
           ) : (
             <section className="call-panel">
-              <div className="call-grid">
+              <div className="call-grid" data-count={remoteCallPeers.length + 1}>
                 <CallVideoTile stream={localCallStream} muted label="Bạn" className="local" />
                 {remoteCallPeers.map((peer) => (
                   <CallVideoTile
