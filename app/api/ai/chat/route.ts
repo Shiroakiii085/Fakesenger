@@ -87,14 +87,15 @@ export async function POST(request: Request) {
           ? String((payload as { error?: { message?: unknown } }).error?.message ?? "")
           : "";
       return json(
-        { error: providerMessage || "Không thể gọi chatbot AI lúc này." },
-        { status: response.status >= 500 ? 502 : response.status }
+        { error: providerMessage ? `Lỗi từ AI: ${providerMessage}` : "Không thể gọi chatbot AI lúc này." },
+        { status: 400 } // Always return 400 or 502, but standard 400 allows frontend to show error text correctly without throwing unhandled exceptions if the fetch wrapper is picky
       );
     }
 
     const message = readAssistantText(payload);
     if (!message) {
-      throw new Error("Chatbot AI chưa trả về nội dung.");
+      console.error("Lỗi parse nội dung từ AI payload:", JSON.stringify(payload));
+      return json({ error: "Chatbot AI trả về dữ liệu không hợp lệ. Vui lòng thử lại hoặc đổi model khác." }, { status: 400 });
     }
 
     return json({ message });
