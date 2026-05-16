@@ -7,7 +7,6 @@ Web chat realtime như Messenger ở mức sinh viên, tách rõ backend và fro
 - Frontend: Next.js App Router, React, CSS thuần.
 - Backend: Next.js API Routes trong thư mục `app/api`.
 - Auth, database, realtime: Supabase free tier.
-- Chatbot AI: OpenRouter Chat Completions API qua route backend riêng.
 - Deploy: Vercel free tier.
 
 ## Chức năng
@@ -20,8 +19,6 @@ Web chat realtime như Messenger ở mức sinh viên, tách rõ backend và fro
 - Tạo nhóm/kênh và thêm thành viên.
 - Tin nhắn realtime qua Supabase Realtime.
 - Cập nhật tên hiển thị và trạng thái.
-- Trợ lý AI trong thanh cuộc trò chuyện.
-- Gọi `@ChatBot` trực tiếp trong nhóm hoặc kênh để bot phản hồi trong phòng chat.
 
 ## Chạy local
 
@@ -33,8 +30,6 @@ Web chat realtime như Messenger ở mức sinh viên, tách rõ backend và fro
 ```bash
 NEXT_PUBLIC_SUPABASE_URL=...
 NEXT_PUBLIC_SUPABASE_ANON_KEY=...
-OPENROUTER_API_KEY=...
-OPENROUTER_MODEL=openai/gpt-5-mini
 ```
 
 5. Cài và chạy:
@@ -51,15 +46,12 @@ npm run dev
 3. Thêm các biến môi trường:
    - `NEXT_PUBLIC_SUPABASE_URL`
    - `NEXT_PUBLIC_SUPABASE_ANON_KEY`
-   - `OPENROUTER_API_KEY`
-   - `OPENROUTER_MODEL`
 4. Deploy.
 
-Không cần server riêng. Vercel và Supabase vẫn có thể chạy trong free tier, nhưng chatbot AI dùng OpenRouter nên sẽ phát sinh chi phí theo model bạn chọn.
+Không cần server riêng. Vercel và Supabase vẫn có thể chạy trong free tier.
 
 ## Bảo mật biến môi trường
 
 - Không commit file `.env`, `.env.local`, `.env.production` hoặc bất kỳ file `.env.*` nào khác.
 - Chỉ giữ placeholder trong `.env.example`.
-- `OPENROUTER_API_KEY` chỉ được đặt trong Environment Variables của Vercel hoặc file môi trường local, không dùng tiền tố `NEXT_PUBLIC_`.
 - Các khóa bí mật khác cũng không được đưa vào mã nguồn hay trình duyệt.

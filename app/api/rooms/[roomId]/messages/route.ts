@@ -1,63 +1,4 @@
-import { CHATBOT_USER_ID, createOpenRouterChatCompletion, hasOpenRouterApiKey } from "@/lib/openrouter";
-import { errorJson, getRouteContext, json, type RouteContext } from "@/lib/supabase-route";
-
-const CHATBOT_MENTION_PATTERN = /(^|\s)@chatbot\b/i;
-
-function hasChatbotMention(message: string) {
-  return CHATBOT_MENTION_PATTERN.test(message);
-}
-
-function getChatbotErrorMessage(error: unknown) {
-  if (error && typeof error === "object" && "message" in error) {
-    const message = String((error as { message?: unknown }).message ?? "");
-    if (message.includes("insert_chatbot_message")) {
-      return "ChatBot chưa được bật trong cơ sở dữ liệu. Hãy chạy lại script Supabase mới nhất.";
-    }
-    return message || "ChatBot chưa thể phản hồi lúc này.";
-  }
-
-  return "ChatBot chưa thể phản hồi lúc này.";
-}
-
-async function createChatbotReply(supabase: RouteContext["supabase"], roomId: string) {
-  if (!hasOpenRouterApiKey()) {
-    throw new Error("ChatBot chưa được cấu hình OPENROUTER_API_KEY.");
-  }
-
-  const { data: recentMessages, error: recentMessagesError } = await supabase
-    .from("messages")
-    .select("body, user_id, profiles:profiles!messages_user_id_fkey(display_name)")
-    .eq("room_id", roomId)
-    .eq("kind", "text")
-    .eq("is_deleted", false)
-    .order("created_at", { ascending: false })
-    .limit(12);
-
-  if (recentMessagesError) throw recentMessagesError;
-
-  const chatMessages = (recentMessages ?? [])
-    .reverse()
-    .map((message) => ({
-      role: message.user_id === CHATBOT_USER_ID ? ("assistant" as const) : ("user" as const),
-      content: `${(message.profiles as { display_name?: string } | null)?.display_name || "User"}: ${message.body}`
-    }));
-
-  const reply = await createOpenRouterChatCompletion([
-    {
-      role: "system",
-      content:
-        "Bạn là trợ lý AI tên ChatBot trong ứng dụng chat Fakesenger. Bạn đang tham gia một phòng chat. Trả lời bằng tiếng Việt rõ ràng, ngắn gọn, hữu ích, và chỉ trả lời nội dung người dùng vừa hỏi."
-    },
-    ...chatMessages
-  ]);
-
-  const { error } = await supabase.rpc("insert_chatbot_message", {
-    target_room_id: roomId,
-    content: reply
-  });
-
-  if (error) throw error;
-}
+import { errorJson, getRouteContext, json } from "@/lib/supabase-route";
 
 export async function GET(request: Request, context: { params: Promise<{ roomId: string }> }) {
   try {
@@ -133,9 +74,7 @@ export async function POST(request: Request, context: { params: Promise<{ roomId
 
     if (error) throw error;
 
-    let chatbotError: string | null = null;
-
-    // Process mentions and ChatBot
+    // Process mentions
     if (kind === "text" && message.includes("@")) {
       const { data: roomMembers } = await supabase
         .from("room_members")
@@ -163,17 +102,9 @@ export async function POST(request: Request, context: { params: Promise<{ roomId
         }
       }
 
-      if (hasChatbotMention(message)) {
-        try {
-          await createChatbotReply(supabase, roomId);
-        } catch (error) {
-          console.error("ChatBot reply error:", error);
-          chatbotError = getChatbotErrorMessage(error);
-        }
-      }
     }
 
-    return json({ message: data, chatbotError }, { status: 201 });
+    return json({ message: data }, { status: 201 });
   } catch (error) {
     return errorJson(error);
   }

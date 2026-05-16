@@ -506,16 +506,7 @@ label {
   color: rgba(255, 255, 255, 0.72);
 }
 
-.ai-room-item .room-symbol,
-.ai-room-symbol {
-  color: #7c5d00;
-  background: rgba(247, 197, 72, 0.22);
-}
 
-.ai-room-item.selected .room-symbol {
-  color: #7c5d00;
-  background: rgba(247, 197, 72, 0.92);
-}
 
 .room-symbol {
   width: 36px;
@@ -645,33 +636,10 @@ label {
   opacity: 0.78;
 }
 
-.ai-thinking {
-  min-width: 92px;
-  display: inline-flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 6px;
-}
 
-.ai-thinking strong {
-  flex-basis: 100%;
-}
 
-.ai-thinking span {
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-  background: var(--mint-dark);
-  animation: loading-pulse 900ms ease-in-out infinite;
-}
 
-.ai-thinking span:nth-of-type(2) {
-  animation-delay: 120ms;
-}
 
-.ai-thinking span:nth-of-type(3) {
-  animation-delay: 240ms;
-}
 
 .message-loading {
   display: flex;
@@ -861,9 +829,6 @@ label {
   background: rgba(255, 255, 255, 0.76);
 }
 
-.ai-composer {
-  grid-template-columns: minmax(0, 1fr) auto;
-}
 
 .edit-message-bar {
   display: grid;
@@ -1308,10 +1273,6 @@ label {
     grid-template-columns: auto auto minmax(0, 1fr) auto;
     gap: 8px;
     padding: 10px 12px calc(10px + env(safe-area-inset-bottom));
-  }
-
-  .ai-composer {
-    grid-template-columns: minmax(0, 1fr) auto;
   }
 
   .composer-tool,
