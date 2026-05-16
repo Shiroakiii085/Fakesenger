@@ -7,6 +7,7 @@ Web chat realtime như Messenger ở mức sinh viên, tách rõ backend và fro
 - Frontend: Next.js App Router, React, CSS thuần.
 - Backend: Next.js API Routes trong thư mục `app/api`.
 - Auth, database, realtime: Supabase free tier.
+- Chatbot AI: OpenAI Responses API qua route backend riêng.
 - Deploy: Vercel free tier.
 
 ## Chức năng
@@ -19,6 +20,7 @@ Web chat realtime như Messenger ở mức sinh viên, tách rõ backend và fro
 - Tạo nhóm/kênh và thêm thành viên.
 - Tin nhắn realtime qua Supabase Realtime.
 - Cập nhật tên hiển thị và trạng thái.
+- Trợ lý AI trong thanh cuộc trò chuyện.
 
 ## Chạy local
 
@@ -30,6 +32,8 @@ Web chat realtime như Messenger ở mức sinh viên, tách rõ backend và fro
 ```bash
 NEXT_PUBLIC_SUPABASE_URL=...
 NEXT_PUBLIC_SUPABASE_ANON_KEY=...
+OPENAI_API_KEY=...
+OPENAI_MODEL=gpt-5-mini
 ```
 
 5. Cài và chạy:
@@ -43,9 +47,18 @@ npm run dev
 
 1. Push source lên GitHub.
 2. Import repo vào Vercel.
-3. Thêm 2 biến môi trường:
+3. Thêm các biến môi trường:
    - `NEXT_PUBLIC_SUPABASE_URL`
    - `NEXT_PUBLIC_SUPABASE_ANON_KEY`
+   - `OPENAI_API_KEY`
+   - `OPENAI_MODEL`
 4. Deploy.
 
-Không cần server riêng, không cần trả phí nếu dùng trong giới hạn free tier của Vercel và Supabase.
+Không cần server riêng. Vercel và Supabase vẫn có thể chạy trong free tier, nhưng chatbot AI dùng OpenAI API nên sẽ phát sinh chi phí theo mức sử dụng.
+
+## Bảo mật biến môi trường
+
+- Không commit file `.env`, `.env.local`, `.env.production` hoặc bất kỳ file `.env.*` nào khác.
+- Chỉ giữ placeholder trong `.env.example`.
+- `OPENAI_API_KEY` chỉ được đặt trong Environment Variables của Vercel hoặc file môi trường local, không dùng tiền tố `NEXT_PUBLIC_`.
+- Các khóa bí mật khác cũng không được đưa vào mã nguồn hay trình duyệt.

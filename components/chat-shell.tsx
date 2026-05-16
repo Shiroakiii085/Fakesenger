@@ -2,6 +2,7 @@
 
 import {
   Bell,
+  Bot,
   Hash,
   Check,
   Clock,
@@ -33,6 +34,16 @@ type ApiOptions = {
   method?: string;
   body?: unknown;
 };
+
+type AiChatMessage = {
+  id: string;
+  role: "user" | "assistant";
+  body: string;
+  created_at: string;
+};
+
+const AI_ROOM_ID = "__ai_assistant__";
+const AI_STORAGE_PREFIX = "fakesenger:ai-chat:";
 
 class AuthExpiredError extends Error {
   constructor() {
@@ -275,7 +286,10 @@ export function ChatShell() {
   const [rooms, setRooms] = useState<Room[]>([]);
   const [activeRoomId, setActiveRoomId] = useState<string | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
+  const [aiMessages, setAiMessages] = useState<AiChatMessage[]>([]);
+  const [isAiStorageReady, setIsAiStorageReady] = useState(false);
   const [isMessagesLoading, setIsMessagesLoading] = useState(false);
+  const [isAiReplying, setIsAiReplying] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [roomSearchQuery, setRoomSearchQuery] = useState("");
   const [searchResults, setSearchResults] = useState<Profile[]>([]);
@@ -335,6 +349,11 @@ export function ChatShell() {
     () => rooms.find((room) => room.id === activeRoomId) ?? null,
     [rooms, activeRoomId]
   );
+  const isAiChatActive = activeRoomId === AI_ROOM_ID;
+  const aiProfile = useMemo(
+    () => ({ display_name: "AI", avatar_url: null }),
+    []
+  );
 
   const callRoom = useMemo(
     () => rooms.find((room) => room.id === callRoomId) ?? null,
@@ -352,6 +371,51 @@ export function ChatShell() {
     () => new Set(activeRoom?.members.map((member) => member.user_id) ?? []),
     [activeRoom?.members]
   );
+
+  useEffect(() => {
+    setIsAiStorageReady(false);
+    if (!profile?.id) {
+      setAiMessages([]);
+      return;
+    }
+
+    const raw = window.localStorage.getItem(`${AI_STORAGE_PREFIX}${profile.id}`);
+    if (!raw) {
+      setAiMessages([]);
+      setIsAiStorageReady(true);
+      return;
+    }
+
+    try {
+      const parsed = JSON.parse(raw);
+      if (!Array.isArray(parsed)) {
+        setAiMessages([]);
+        setIsAiStorageReady(true);
+        return;
+      }
+
+      setAiMessages(
+        parsed.filter(
+          (message): message is AiChatMessage =>
+            Boolean(
+              message &&
+                typeof message.id === "string" &&
+                (message.role === "user" || message.role === "assistant") &&
+                typeof message.body === "string" &&
+                typeof message.created_at === "string"
+            )
+        )
+      );
+    } catch {
+      setAiMessages([]);
+    }
+    setIsAiStorageReady(true);
+  }, [profile?.id]);
+
+  useEffect(() => {
+    if (!profile?.id || !isAiStorageReady) return;
+    window.localStorage.setItem(`${AI_STORAGE_PREFIX}${profile.id}`, JSON.stringify(aiMessages.slice(-40)));
+  }, [aiMessages, isAiStorageReady, profile?.id]);
 
   useEffect(() => {
     roomsRef.current = rooms;
@@ -428,6 +492,7 @@ export function ChatShell() {
     const data = await authFetch<{ rooms: Room[] }>("/api/rooms");
     setRooms(data.rooms);
     setActiveRoomId((current) => {
+      if (current === AI_ROOM_ID) return current;
       if (current && data.rooms.some((room) => room.id === current)) return current;
       return data.rooms[0]?.id ?? null;
     });
@@ -533,6 +598,7 @@ export function ChatShell() {
         setProfile(null);
         setRooms([]);
         setMessages([]);
+        setAiMessages([]);
         setActiveRoomId(null);
         setIsAccountMenuOpen(false);
         setIsAuthLoading(false);
@@ -600,7 +666,7 @@ export function ChatShell() {
   useEffect(() => {
     if (!isSupabaseConfigured) return;
 
-    if (!activeRoomId) {
+    if (!activeRoomId || activeRoomId === AI_ROOM_ID) {
       setMessages([]);
       setIsMessagesLoading(false);
       return;
@@ -742,7 +808,7 @@ export function ChatShell() {
   useEffect(() => {
     if (!shouldStickToBottomRef.current) return;
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages.length]);
+  }, [aiMessages.length, isAiChatActive, messages.length]);
 
   useEffect(() => {
     shouldStickToBottomRef.current = true;
@@ -871,6 +937,7 @@ export function ChatShell() {
         setProfile(null);
         setRooms([]);
         setMessages([]);
+        setAiMessages([]);
         setActiveRoomId(null);
         setAuthMode("login");
         setPassword("");
@@ -932,6 +999,50 @@ export function ChatShell() {
       setIsMobileRoomsOpen(false);
     } catch (error) {
       setNotice(error instanceof Error ? error.message : "Không thể tạo phòng.");
+    }
+  }
+
+  async function sendAiMessage(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!profile || !messageDraft.trim() || isAiReplying) return;
+
+    const body = messageDraft.trim();
+    const userMessage: AiChatMessage = {
+      id: `ai-user-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+      role: "user",
+      body,
+      created_at: new Date().toISOString()
+    };
+    const nextMessages = [...aiMessages, userMessage];
+
+    setMessageDraft("");
+    setAiMessages(nextMessages);
+    setIsAiReplying(true);
+
+    try {
+      const data = await authFetch<{ message: string }>("/api/ai/chat", {
+        method: "POST",
+        body: {
+          messages: nextMessages.slice(-16).map((message) => ({
+            role: message.role,
+            content: message.body
+          }))
+        }
+      });
+
+      setAiMessages((current) => [
+        ...current,
+        {
+          id: `ai-assistant-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+          role: "assistant",
+          body: data.message,
+          created_at: new Date().toISOString()
+        }
+      ]);
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "Không thể gửi câu hỏi cho chatbot.");
+    } finally {
+      setIsAiReplying(false);
     }
   }
 
@@ -1549,7 +1660,7 @@ export function ChatShell() {
   return (
     <main
       className={`chat-page ${isDetailsOpen && activeRoom && activeRoom.type !== "direct" ? "with-details" : ""} ${
-        isMobileRoomsOpen || !activeRoom ? "mobile-rooms-open" : ""
+        isMobileRoomsOpen || (!activeRoom && !isAiChatActive) ? "mobile-rooms-open" : ""
       }`}
     >
       <aside className="sidebar">
@@ -1647,6 +1758,23 @@ export function ChatShell() {
         </div>
 
         <div className="room-list">
+          <button
+            type="button"
+            className={`room-item ai-room-item ${isAiChatActive ? "selected" : ""}`}
+            onClick={() => {
+              setActiveRoomId(AI_ROOM_ID);
+              setIsMobileRoomsOpen(false);
+            }}
+          >
+            <span className="room-symbol">
+              <Bot size={17} />
+            </span>
+            <span className="room-meta">
+              <strong>Trợ lý AI</strong>
+              <small>Hỏi đáp nhanh trong Fakesenger</small>
+            </span>
+          </button>
+
           {visibleRooms.map((room) => (
             <button
               key={room.id}
@@ -1675,7 +1803,78 @@ export function ChatShell() {
       </aside>
 
       <section className="conversation">
-        {activeRoom ? (
+        {isAiChatActive ? (
+          <>
+            <header className="conversation-header">
+              <div className="header-title">
+                <button
+                  className="icon-button mobile-room-toggle"
+                  type="button"
+                  title="Danh sách phòng"
+                  onClick={() => setIsMobileRoomsOpen(true)}
+                >
+                  <Menu size={18} />
+                </button>
+                <span className="room-symbol large ai-room-symbol">
+                  <Bot size={20} />
+                </span>
+                <div>
+                  <h2>Trợ lý AI</h2>
+                  <p>Hỏi đáp nhanh ngay trong cuộc trò chuyện</p>
+                </div>
+              </div>
+            </header>
+
+            <div className="messages" ref={messagesRef} onScroll={handleMessagesScroll}>
+              {aiMessages.map((message) => {
+                const mine = message.role === "user";
+                return (
+                  <article key={message.id} className={`message-row ai-message-row ${mine ? "mine" : ""}`}>
+                    {!mine && <Avatar profile={aiProfile} />}
+                    <div className="bubble">
+                      {!mine && <strong>Trợ lý AI</strong>}
+                      <p>{message.body}</p>
+                      <time>{formatTime(message.created_at)}</time>
+                    </div>
+                  </article>
+                );
+              })}
+
+              {isAiReplying && (
+                <article className="message-row ai-message-row">
+                  <Avatar profile={aiProfile} />
+                  <div className="bubble ai-thinking">
+                    <strong>Trợ lý AI</strong>
+                    <span />
+                    <span />
+                    <span />
+                  </div>
+                </article>
+              )}
+
+              {aiMessages.length === 0 && !isAiReplying && (
+                <div className="empty-conversation ai-empty-state">
+                  <Bot size={34} />
+                  <h3>Bắt đầu với trợ lý AI</h3>
+                  <p>Hỏi một câu bất kỳ để nhận phản hồi ngay trong ứng dụng.</p>
+                </div>
+              )}
+              <div ref={messagesEndRef} />
+            </div>
+
+            <form className="composer ai-composer" onSubmit={sendAiMessage}>
+              <input
+                value={messageDraft}
+                onChange={(event) => setMessageDraft(event.target.value)}
+                placeholder="Nhập câu hỏi cho trợ lý AI..."
+                disabled={isAiReplying}
+              />
+              <button className="send-button" type="submit" disabled={!messageDraft.trim() || isAiReplying} title="Gửi">
+                <Send size={19} />
+              </button>
+            </form>
+          </>
+        ) : activeRoom ? (
           <>
             <header className="conversation-header">
               <div className="header-title">
