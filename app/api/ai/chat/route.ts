@@ -7,11 +7,20 @@ type IncomingMessage = {
   content?: unknown;
 };
 
+type OpenRouterAnnotation = {
+  type?: string;
+  url_citation?: {
+    url?: string;
+    title?: string;
+  };
+};
+
 type OpenRouterResponse = {
   model?: string;
   choices?: Array<{
     message?: {
       content?: string | null;
+      annotations?: OpenRouterAnnotation[];
     };
   }>;
   error?: {
@@ -19,9 +28,9 @@ type OpenRouterResponse = {
   };
 };
 
-const DEFAULT_MODEL = process.env.OPENROUTER_MODEL || "openrouter/auto";
+const DEFAULT_MODEL = process.env.OPENROUTER_MODEL || "openai/gpt-oss-120b:free";
 const SYSTEM_PROMPT =
-  "Bạn là trợ lý AI trong ứng dụng chat Fakesenger. Trả lời bằng tiếng Việt rõ ràng, hữu ích, ngắn gọn khi có thể, và lịch sự. Nếu người dùng hỏi bằng ngôn ngữ khác, hãy trả lời theo ngôn ngữ đó.";
+  "Bạn là trợ lý AI trong ứng dụng chat Fakesenger. Trả lời bằng tiếng Việt rõ ràng, hữu ích, ngắn gọn khi có thể, và lịch sự. Nếu người dùng hỏi bằng ngôn ngữ khác, hãy trả lời theo ngôn ngữ đó. Khi câu hỏi phụ thuộc vào thông tin mới, thay đổi theo thời gian, hoặc cần kiểm chứng trên Internet, hãy chủ động dùng web search trước khi trả lời.";
 
 function requiredEnv(name: string) {
   const value = process.env[name];
@@ -50,6 +59,23 @@ function normalizeMessages(messages: unknown): Array<{ role: ChatRole; content: 
     }));
 }
 
+function extractSources(annotations?: OpenRouterAnnotation[]) {
+  const seen = new Set<string>();
+
+  return (annotations ?? [])
+    .filter((annotation) => annotation?.type === "url_citation")
+    .map((annotation) => ({
+      title: annotation.url_citation?.title?.trim() || annotation.url_citation?.url?.trim() || "",
+      url: annotation.url_citation?.url?.trim() || ""
+    }))
+    .filter((source) => {
+      if (!source.title || !source.url || seen.has(source.url)) return false;
+      seen.add(source.url);
+      return true;
+    })
+    .slice(0, 5);
+}
+
 export async function POST(request: Request) {
   try {
     await getRouteContext(request);
@@ -71,6 +97,16 @@ export async function POST(request: Request) {
       body: JSON.stringify({
         model: DEFAULT_MODEL,
         messages: [{ role: "system", content: SYSTEM_PROMPT }, ...messages],
+        tools: [
+          {
+            type: "openrouter:web_search",
+            parameters: {
+              max_results: 5,
+              max_total_results: 10,
+              search_context_size: "medium"
+            }
+          }
+        ],
         temperature: 0.7,
         max_tokens: 900
       })
@@ -81,14 +117,16 @@ export async function POST(request: Request) {
       return json({ error: data.error?.message || "Không thể lấy phản hồi từ OpenRouter." }, { status: response.status });
     }
 
-    const content = data.choices?.[0]?.message?.content?.trim();
+    const message = data.choices?.[0]?.message;
+    const content = message?.content?.trim();
     if (!content) {
       return json({ error: "OpenRouter không trả về nội dung phản hồi." }, { status: 502 });
     }
 
     return json({
       message: content,
-      model: data.model || DEFAULT_MODEL
+      model: data.model || DEFAULT_MODEL,
+      sources: extractSources(message?.annotations)
     });
   } catch (error) {
     return errorJson(error, 500);

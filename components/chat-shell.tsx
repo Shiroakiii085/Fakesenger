@@ -42,7 +42,13 @@ type AiChatMessage = {
   createdAt: string;
   pending?: boolean;
   model?: string;
+  sources?: Array<{
+    title: string;
+    url: string;
+  }>;
 };
+
+const DEFAULT_AI_MODEL = "openai/gpt-oss-120b:free";
 
 
 class AuthExpiredError extends Error {
@@ -313,7 +319,7 @@ export function ChatShell() {
   const [aiMessages, setAiMessages] = useState<AiChatMessage[]>([]);
   const [aiDraft, setAiDraft] = useState("");
   const [isAiSending, setIsAiSending] = useState(false);
-  const [aiModelUsed, setAiModelUsed] = useState("openrouter/auto");
+  const [aiModelUsed, setAiModelUsed] = useState(DEFAULT_AI_MODEL);
   const [openMessageMenuId, setOpenMessageMenuId] = useState<string | null>(null);
   const [messageMenuDirection, setMessageMenuDirection] = useState<"up" | "down">("down");
   const [editingMessageId, setEditingMessageId] = useState<string | null>(null);
@@ -554,7 +560,7 @@ export function ChatShell() {
         setAiMessages([]);
         setAiDraft("");
         setIsAiChatOpen(false);
-        setAiModelUsed("openrouter/auto");
+        setAiModelUsed(DEFAULT_AI_MODEL);
         setActiveRoomId(null);
         setIsAccountMenuOpen(false);
         setIsAuthLoading(false);
@@ -896,7 +902,7 @@ export function ChatShell() {
         setAiMessages([]);
         setAiDraft("");
         setIsAiChatOpen(false);
-        setAiModelUsed("openrouter/auto");
+        setAiModelUsed(DEFAULT_AI_MODEL);
         setActiveRoomId(null);
         setAuthMode("login");
         setPassword("");
@@ -1040,7 +1046,14 @@ export function ChatShell() {
     setAiMessages((current) => [...current, userMessage, pendingMessage]);
 
     try {
-      const data = await authFetch<{ message: string; model: string }>("/api/ai/chat", {
+      const data = await authFetch<{
+        message: string;
+        model: string;
+        sources?: Array<{
+          title: string;
+          url: string;
+        }>;
+      }>("/api/ai/chat", {
         method: "POST",
         body: { messages: requestMessages }
       });
@@ -1052,7 +1065,8 @@ export function ChatShell() {
                 ...message,
                 content: data.message,
                 pending: false,
-                model: data.model
+                model: data.model,
+                sources: data.sources
               }
             : message
         )
@@ -1743,7 +1757,7 @@ export function ChatShell() {
             </span>
             <span className="room-meta">
               <strong>Trợ lý AI</strong>
-              <small>OpenRouter tự chọn model phù hợp</small>
+              <small>gpt-oss-120b + web search khi cần</small>
             </span>
           </button>
 
@@ -1812,6 +1826,15 @@ export function ChatShell() {
                     <div className={`bubble ${!mine ? "ai-bubble" : ""}`}>
                       {!mine && <strong>Trợ lý AI</strong>}
                       <p>{message.content}</p>
+                      {!mine && message.sources && message.sources.length > 0 && (
+                        <div className="ai-sources">
+                          {message.sources.map((source) => (
+                            <a key={source.url} href={source.url} target="_blank" rel="noreferrer">
+                              {new URL(source.url).hostname.replace(/^www\./, "")}
+                            </a>
+                          ))}
+                        </div>
+                      )}
                       <time>{message.pending ? "Đang trả lời" : formatTime(message.createdAt)}</time>
                     </div>
                   </article>

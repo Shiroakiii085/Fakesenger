@@ -19,7 +19,7 @@ Web chat realtime như Messenger ở mức sinh viên, tách rõ backend và fro
 - Tạo nhóm/kênh và thêm thành viên.
 - Tin nhắn realtime qua Supabase Realtime.
 - Cập nhật tên hiển thị và trạng thái.
-- Trợ lý AI qua OpenRouter, dùng router tự chọn model phù hợp theo từng câu hỏi.
+- Trợ lý AI qua OpenRouter, ghim model free `openai/gpt-oss-120b:free` và có thể dùng web search khi câu hỏi cần dữ liệu mới.
 
 ## Chạy local
 
@@ -32,10 +32,11 @@ Web chat realtime như Messenger ở mức sinh viên, tách rõ backend và fro
 NEXT_PUBLIC_SUPABASE_URL=...
 NEXT_PUBLIC_SUPABASE_ANON_KEY=...
 OPENROUTER_API_KEY=...
-OPENROUTER_MODEL=openrouter/auto
+OPENROUTER_MODEL=openai/gpt-oss-120b:free
 ```
 
 `OPENROUTER_SITE_URL` và `OPENROUTER_APP_NAME` là tuỳ chọn; có thể giữ mặc định trong `.env.example`.
+Web search của OpenRouter là tính năng riêng và có thể phát sinh phí tìm kiếm nhỏ nếu model gọi công cụ này, dù bản thân model đang dùng là free.
 
 5. Cài và chạy:
 

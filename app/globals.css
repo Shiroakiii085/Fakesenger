@@ -662,6 +662,29 @@ label {
     white;
 }
 
+.ai-sources {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 10px;
+}
+
+.ai-sources a {
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid rgba(124, 93, 0, 0.2);
+  border-radius: 999px;
+  padding: 4px 8px;
+  color: #7c5d00;
+  background: rgba(247, 197, 72, 0.14);
+  font-size: 11px;
+  text-decoration: none;
+}
+
+.ai-sources a:hover {
+  background: rgba(247, 197, 72, 0.24);
+}
+
 .ai-avatar {
   color: #7c5d00;
   background: rgba(247, 197, 72, 0.22);
