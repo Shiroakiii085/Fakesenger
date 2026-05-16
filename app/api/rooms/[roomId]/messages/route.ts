@@ -1,4 +1,63 @@
-import { errorJson, getRouteContext, json } from "@/lib/supabase-route";
+import { CHATBOT_USER_ID, createOpenRouterChatCompletion, hasOpenRouterApiKey } from "@/lib/openrouter";
+import { errorJson, getRouteContext, json, type RouteContext } from "@/lib/supabase-route";
+
+const CHATBOT_MENTION_PATTERN = /(^|\s)@chatbot\b/i;
+
+function hasChatbotMention(message: string) {
+  return CHATBOT_MENTION_PATTERN.test(message);
+}
+
+function getChatbotErrorMessage(error: unknown) {
+  if (error && typeof error === "object" && "message" in error) {
+    const message = String((error as { message?: unknown }).message ?? "");
+    if (message.includes("insert_chatbot_message")) {
+      return "ChatBot chưa được bật trong cơ sở dữ liệu. Hãy chạy lại script Supabase mới nhất.";
+    }
+    return message || "ChatBot chưa thể phản hồi lúc này.";
+  }
+
+  return "ChatBot chưa thể phản hồi lúc này.";
+}
+
+async function createChatbotReply(supabase: RouteContext["supabase"], roomId: string) {
+  if (!hasOpenRouterApiKey()) {
+    throw new Error("ChatBot chưa được cấu hình OPENROUTER_API_KEY.");
+  }
+
+  const { data: recentMessages, error: recentMessagesError } = await supabase
+    .from("messages")
+    .select("body, user_id, profiles:profiles!messages_user_id_fkey(display_name)")
+    .eq("room_id", roomId)
+    .eq("kind", "text")
+    .eq("is_deleted", false)
+    .order("created_at", { ascending: false })
+    .limit(12);
+
+  if (recentMessagesError) throw recentMessagesError;
+
+  const chatMessages = (recentMessages ?? [])
+    .reverse()
+    .map((message) => ({
+      role: message.user_id === CHATBOT_USER_ID ? ("assistant" as const) : ("user" as const),
+      content: `${(message.profiles as { display_name?: string } | null)?.display_name || "User"}: ${message.body}`
+    }));
+
+  const reply = await createOpenRouterChatCompletion([
+    {
+      role: "system",
+      content:
+        "Bạn là trợ lý AI tên ChatBot trong ứng dụng chat Fakesenger. Bạn đang tham gia một phòng chat. Trả lời bằng tiếng Việt rõ ràng, ngắn gọn, hữu ích, và chỉ trả lời nội dung người dùng vừa hỏi."
+    },
+    ...chatMessages
+  ]);
+
+  const { error } = await supabase.rpc("insert_chatbot_message", {
+    target_room_id: roomId,
+    content: reply
+  });
+
+  if (error) throw error;
+}
 
 export async function GET(request: Request, context: { params: Promise<{ roomId: string }> }) {
   try {
@@ -21,7 +80,7 @@ export async function GET(request: Request, context: { params: Promise<{ roomId:
       .from("messages")
       .select("id,room_id,user_id,body,kind,media_url,call_status,call_duration_seconds,created_at,edited_at,is_deleted,profiles:profiles!messages_user_id_fkey(id,email,display_name,avatar_url,status)")
       .eq("room_id", roomId);
-      
+
     if (clearedAt) {
       query = query.gt("created_at", clearedAt);
     }
@@ -74,18 +133,20 @@ export async function POST(request: Request, context: { params: Promise<{ roomId
 
     if (error) throw error;
 
+    let chatbotError: string | null = null;
+
     // Process mentions and ChatBot
     if (kind === "text" && message.includes("@")) {
       const { data: roomMembers } = await supabase
         .from("room_members")
         .select("user_id, profiles!inner(display_name)")
         .eq("room_id", roomId);
-        
+
       if (roomMembers) {
         const notifications = [];
         for (const member of roomMembers) {
           // Type casting since Supabase typings might not know profiles is an object here
-          const profile = member.profiles as any;
+          const profile = member.profiles as { display_name?: string } | null;
           const name = profile?.display_name;
           if (name && member.user_id !== user.id && message.includes(`@${name}`)) {
             notifications.push({
@@ -93,7 +154,7 @@ export async function POST(request: Request, context: { params: Promise<{ roomId
               actor_id: user.id,
               room_id: roomId,
               type: "mention",
-              message: `${(data.profiles as any)?.display_name || 'Ai đó'} đã nhắc đến bạn.`
+              message: `${(data.profiles as { display_name?: string } | null)?.display_name || "Ai đó"} đã nhắc đến bạn.`
             });
           }
         }
@@ -102,64 +163,17 @@ export async function POST(request: Request, context: { params: Promise<{ roomId
         }
       }
 
-      if (message.includes("@ChatBot")) {
-        const apiKey = process.env.OPENROUTER_API_KEY || process.env.OPENAI_API_KEY;
-        if (apiKey) {
-          const { data: recentMessages } = await supabase
-            .from("messages")
-            .select("body, user_id, profiles:profiles!messages_user_id_fkey(display_name)")
-            .eq("room_id", roomId)
-            .eq("kind", "text")
-            .order("created_at", { ascending: false })
-            .limit(10);
-            
-          const chatMessages = (recentMessages || []).reverse().map(m => ({
-            role: m.user_id === "00000000-0000-0000-0000-000000000000" ? "assistant" : "user",
-            content: `${(m.profiles as any)?.display_name || 'User'}: ${m.body}`
-          }));
-
-          fetch("https://openrouter.ai/api/v1/chat/completions", {
-            method: "POST",
-            headers: {
-              Authorization: `Bearer ${apiKey}`,
-              "Content-Type": "application/json",
-              "HTTP-Referer": process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000",
-              "X-Title": "Fakesenger",
-            },
-            body: JSON.stringify({
-              model: process.env.OPENROUTER_MODEL || process.env.OPENAI_MODEL || "meta-llama/llama-3.2-3b-instruct:free",
-              messages: [
-                {
-                  role: "system",
-                  content: "Bạn là trợ lý AI tên ChatBot trong ứng dụng chat Fakesenger. Bạn đang tham gia một nhóm chat. Trả lời bằng tiếng Việt rõ ràng, ngắn gọn."
-                },
-                ...chatMessages
-              ],
-              max_tokens: 700
-            })
-          })
-          .then(res => res.json())
-          .then(async payload => {
-            let reply = "";
-            const choices = payload?.choices;
-            if (Array.isArray(choices) && choices.length > 0) {
-              reply = choices[0]?.message?.content || "";
-            }
-            if (reply.trim()) {
-              await supabase.from("messages").insert({
-                room_id: roomId,
-                user_id: "00000000-0000-0000-0000-000000000000",
-                body: reply.trim(),
-                kind: "text"
-              });
-            }
-          })
-          .catch(e => console.error("ChatBot fetch error:", e));
+      if (hasChatbotMention(message)) {
+        try {
+          await createChatbotReply(supabase, roomId);
+        } catch (error) {
+          console.error("ChatBot reply error:", error);
+          chatbotError = getChatbotErrorMessage(error);
         }
       }
     }
 
-    return json({ message: data }, { status: 201 });
+    return json({ message: data, chatbotError }, { status: 201 });
   } catch (error) {
     return errorJson(error);
   }

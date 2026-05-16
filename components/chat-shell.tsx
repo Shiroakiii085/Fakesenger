@@ -44,6 +44,14 @@ type AiChatMessage = {
 
 const AI_ROOM_ID = "__ai_assistant__";
 const AI_STORAGE_PREFIX = "fakesenger:ai-chat:";
+const CHATBOT_USER_ID = "00000000-0000-0000-0000-000000000000";
+const CHATBOT_PROFILE: Profile = {
+  id: CHATBOT_USER_ID,
+  email: "chatbot@fakesenger.local",
+  display_name: "ChatBot",
+  avatar_url: null,
+  status: "online"
+};
 
 class AuthExpiredError extends Error {
   constructor() {
@@ -692,7 +700,10 @@ export function ChatShell() {
         { event: "INSERT", schema: "public", table: "messages", filter: `room_id=eq.${activeRoomId}` },
         (payload) => {
           const row = payload.new as Omit<Message, "profiles">;
-          const sender = activeRoomRef.current?.members.find((member) => member.user_id === row.user_id)?.profiles ?? null;
+          const sender =
+            row.user_id === CHATBOT_USER_ID
+              ? CHATBOT_PROFILE
+              : activeRoomRef.current?.members.find((member) => member.user_id === row.user_id)?.profiles ?? null;
           setMessages((current) => upsertServerMessage(current, { ...row, profiles: sender }));
         }
       )
@@ -1071,11 +1082,14 @@ export function ChatShell() {
     setMessages((current) => appendUniqueMessage(current, pendingMessage));
 
     try {
-      const data = await authFetch<{ message: Message }>(`/api/rooms/${activeRoom.id}/messages`, {
+      const data = await authFetch<{ message: Message; chatbotError?: string | null }>(`/api/rooms/${activeRoom.id}/messages`, {
         method: "POST",
         body: { body }
       });
       setMessages((current) => upsertServerMessage(current, data.message));
+      if (data.chatbotError) {
+        setNotice(data.chatbotError);
+      }
       setRooms((current) =>
         sortRoomsByRecent(
           current.map((room) => (room.id === activeRoom.id ? { ...room, updated_at: data.message.created_at } : room))

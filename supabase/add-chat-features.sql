@@ -51,7 +51,45 @@ insert into public.profiles (id, email, display_name, status)
 values ('00000000-0000-0000-0000-000000000000', 'chatbot@fakesenger.local', 'ChatBot', 'online')
 on conflict (id) do update set display_name = 'ChatBot';
 
--- 3. Add cleared_at to room_members
+-- 3. Allow authenticated room members to create ChatBot replies through a controlled RPC
+create or replace function public.insert_chatbot_message(target_room_id uuid, content text)
+returns public.messages
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  inserted_message public.messages;
+begin
+  if auth.uid() is null then
+    raise exception 'Not authenticated';
+  end if;
+
+  if not public.is_room_member(target_room_id, auth.uid()) then
+    raise exception 'Not a room member';
+  end if;
+
+  if nullif(trim(content), '') is null then
+    raise exception 'ChatBot reply cannot be empty';
+  end if;
+
+  insert into public.messages (room_id, user_id, body, kind)
+  values (
+    target_room_id,
+    '00000000-0000-0000-0000-000000000000',
+    left(trim(content), 2000),
+    'text'
+  )
+  returning * into inserted_message;
+
+  return inserted_message;
+end;
+$$;
+
+revoke all on function public.insert_chatbot_message(uuid, text) from public;
+grant execute on function public.insert_chatbot_message(uuid, text) to authenticated;
+
+-- 4. Add cleared_at to room_members
 alter table public.room_members add column if not exists cleared_at timestamptz;
 
 -- Ensure realtime is enabled for notifications
