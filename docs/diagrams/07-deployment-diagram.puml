@@ -1,0 +1,22 @@
+@startuml
+skinparam shadowing false
+node "GitHub Repository" as GitHub
+node "Vercel Deployment" as Vercel {
+  artifact "Next.js App" as App
+}
+cloud "Supabase Project" as Supabase {
+  database "PostgreSQL" as DB
+  component "Auth" as Auth
+  component "Realtime" as Realtime
+  component "Storage" as Storage
+}
+cloud "Metered TURN" as Metered
+node "Desktop / Mobile Browser" as Client
+
+GitHub --> Vercel : Push source code
+Client --> Vercel : HTTPS
+Client --> Supabase : Auth / Realtime / Storage
+App --> DB : API CRUD
+App --> Auth : Verify user
+Client --> Metered : TURN relay khi cần
+@enduml

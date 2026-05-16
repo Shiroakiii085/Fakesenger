@@ -1,0 +1,20 @@
+@startuml
+skinparam shadowing false
+start
+:Thành viên tìm người dùng;
+if (Là admin?) then (Có)
+  :Thêm trực tiếp vào room_members;
+  :Người mới vào nhóm;
+else (Không)
+  :Tạo member_requests trạng thái pending;
+  :Realtime thông báo cho admin;
+  if (Admin phê duyệt?) then (Có)
+    :Thêm người dùng vào room_members;
+    :Cập nhật request = approved;
+    :Người mới vào nhóm;
+  else (Không)
+    :Cập nhật request = rejected;
+  endif
+endif
+stop
+@enduml

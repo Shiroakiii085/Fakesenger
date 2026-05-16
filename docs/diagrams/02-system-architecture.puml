@@ -1,0 +1,39 @@
+@startuml
+skinparam componentStyle rectangle
+skinparam shadowing false
+
+actor "Người dùng" as User
+
+node "Thiết bị người dùng" {
+  component "Trình duyệt\nReact UI" as Browser
+}
+
+cloud "Vercel" {
+  component "Next.js App Router" as NextApp
+  component "API Routes" as Api
+}
+
+cloud "Supabase" {
+  component "Auth" as Auth
+  database "PostgreSQL" as DB
+  component "Realtime" as Realtime
+  component "Storage" as Storage
+}
+
+cloud "TURN/STUN" {
+  component "Metered TURN" as Turn
+}
+
+User --> Browser
+Browser --> NextApp : HTTPS
+Browser --> Api : REST + Bearer token
+Api --> Auth : Xác thực JWT
+Api --> DB : CRUD dữ liệu
+Browser --> Realtime : Subscribe / Broadcast
+Browser --> Storage : Upload media
+Browser <--> Browser : WebRTC media
+Browser --> Turn : ICE / relay khi cần
+
+Realtime --> Browser : Tin nhắn, yêu cầu,\nsignaling
+Storage --> Browser : URL ảnh / audio
+@enduml

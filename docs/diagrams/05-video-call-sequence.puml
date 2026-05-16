@@ -1,0 +1,29 @@
+@startuml
+skinparam shadowing false
+actor "Người gọi" as Caller
+participant "Client A" as A
+participant "Supabase Broadcast" as Signal
+participant "Client B" as B
+participant "STUN/TURN" as Ice
+
+Caller -> A : Bấm gọi video
+A -> A : Xin quyền camera/micro
+A -> Signal : invite
+Signal -> B : invite
+B -> B : Hiện màn hình nhận cuộc gọi
+B -> Signal : join
+Signal -> A : join
+A -> A : createOffer()
+A -> Signal : offer
+Signal -> B : offer
+B -> B : setRemoteDescription()\ncreateAnswer()
+B -> Signal : answer
+Signal -> A : answer
+A <-> Ice : Thu thập ICE candidate
+B <-> Ice : Thu thập ICE candidate
+A -> Signal : ICE candidates
+Signal -> B : ICE candidates
+B -> Signal : ICE candidates
+Signal -> A : ICE candidates
+A <--> B : Luồng audio/video WebRTC
+@enduml

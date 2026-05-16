@@ -1,0 +1,74 @@
+@startuml
+hide circle
+skinparam linetype ortho
+skinparam shadowing false
+
+entity "profiles" as profiles {
+  * id : uuid <<PK>>
+  --
+  email : text
+  display_name : text
+  avatar_url : text
+  status : text
+}
+
+entity "rooms" as rooms {
+  * id : uuid <<PK>>
+  --
+  type : room_type
+  name : text
+  description : text
+  direct_key : text
+  created_by : uuid <<FK>>
+}
+
+entity "room_members" as room_members {
+  * room_id : uuid <<PK,FK>>
+  * user_id : uuid <<PK,FK>>
+  --
+  role : member_role
+  joined_at : timestamptz
+}
+
+entity "messages" as messages {
+  * id : uuid <<PK>>
+  --
+  room_id : uuid <<FK>>
+  user_id : uuid <<FK>>
+  body : text
+  kind : text
+  media_url : text
+  call_status : text
+  call_duration_seconds : integer
+  is_deleted : boolean
+}
+
+entity "message_hides" as message_hides {
+  * message_id : uuid <<PK,FK>>
+  * user_id : uuid <<PK,FK>>
+  --
+  hidden_at : timestamptz
+}
+
+entity "member_requests" as member_requests {
+  * id : uuid <<PK>>
+  --
+  room_id : uuid <<FK>>
+  requester_id : uuid <<FK>>
+  target_user_id : uuid <<FK>>
+  status : text
+  decided_by : uuid <<FK>>
+}
+
+profiles ||--o{ rooms : created_by
+profiles ||--o{ room_members : user_id
+rooms ||--o{ room_members : room_id
+profiles ||--o{ messages : user_id
+rooms ||--o{ messages : room_id
+messages ||--o{ message_hides : message_id
+profiles ||--o{ message_hides : user_id
+rooms ||--o{ member_requests : room_id
+profiles ||--o{ member_requests : requester_id
+profiles ||--o{ member_requests : target_user_id
+profiles ||--o{ member_requests : decided_by
+@enduml

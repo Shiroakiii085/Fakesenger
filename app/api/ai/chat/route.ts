@@ -8,31 +8,21 @@ type AiInputMessage = {
 function readAssistantText(payload: unknown) {
   if (!payload || typeof payload !== "object") return "";
 
-  const directText = (payload as { output_text?: unknown }).output_text;
-  if (typeof directText === "string" && directText.trim()) {
-    return directText.trim();
+  const choices = (payload as { choices?: unknown }).choices;
+  if (Array.isArray(choices) && choices.length > 0) {
+    const firstChoice = choices[0];
+    if (firstChoice && typeof firstChoice === "object") {
+      const message = (firstChoice as { message?: unknown }).message;
+      if (message && typeof message === "object") {
+        const content = (message as { content?: unknown }).content;
+        if (typeof content === "string" && content.trim()) {
+          return content.trim();
+        }
+      }
+    }
   }
 
-  const output = (payload as { output?: unknown }).output;
-  if (!Array.isArray(output)) return "";
-
-  return output
-    .flatMap((item) => {
-      if (!item || typeof item !== "object" || !Array.isArray((item as { content?: unknown }).content)) {
-        return [];
-      }
-
-      return (item as { content: unknown[] }).content
-        .map((content) => {
-          if (!content || typeof content !== "object") return "";
-          const type = (content as { type?: unknown }).type;
-          const text = (content as { text?: unknown }).text;
-          return type === "output_text" && typeof text === "string" ? text : "";
-        })
-        .filter(Boolean);
-    })
-    .join("\n")
-    .trim();
+  return "";
 }
 
 function normalizeMessages(value: unknown): AiInputMessage[] {
@@ -56,7 +46,7 @@ export async function POST(request: Request) {
   try {
     await getRouteContext(request);
 
-    const apiKey = process.env.OPENAI_API_KEY;
+    const apiKey = process.env.OPENROUTER_API_KEY || process.env.OPENAI_API_KEY;
     if (!apiKey) {
       return json({ error: "Chatbot AI chưa được cấu hình." }, { status: 503 });
     }
@@ -68,19 +58,25 @@ export async function POST(request: Request) {
       return json({ error: "Vui lòng nhập câu hỏi cho chatbot." }, { status: 400 });
     }
 
-    const response = await fetch("https://api.openai.com/v1/responses", {
+    const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
       method: "POST",
       headers: {
         Authorization: `Bearer ${apiKey}`,
+        "HTTP-Referer": process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000",
+        "X-Title": "Fakesenger",
         "Content-Type": "application/json"
       },
       body: JSON.stringify({
-        model: process.env.OPENAI_MODEL || "gpt-5-mini",
-        instructions:
-          "Bạn là trợ lý AI trong ứng dụng chat Fakesenger. Trả lời bằng tiếng Việt rõ ràng, ngắn gọn, hữu ích và lịch sự. Khi người dùng hỏi về kỹ thuật, ưu tiên các bước có thể làm ngay.",
-        input: messages,
-        max_output_tokens: 700,
-        store: false
+        model: process.env.OPENROUTER_MODEL || process.env.OPENAI_MODEL || "meta-llama/llama-3.2-3b-instruct:free",
+        messages: [
+          {
+            role: "system",
+            content:
+              "Bạn là trợ lý AI trong ứng dụng chat Fakesenger. Trả lời bằng tiếng Việt rõ ràng, ngắn gọn, hữu ích và lịch sự. Khi người dùng hỏi về kỹ thuật, ưu tiên các bước có thể làm ngay."
+          },
+          ...messages
+        ],
+        max_tokens: 700
       })
     });
 

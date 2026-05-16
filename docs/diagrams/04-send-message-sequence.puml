@@ -1,0 +1,21 @@
+@startuml
+skinparam shadowing false
+actor "Người gửi" as Sender
+participant "React UI" as UI
+participant "API Route\n/messages" as API
+database "Supabase DB" as DB
+participant "Supabase Realtime" as RT
+participant "Người nhận" as Receiver
+
+Sender -> UI : Nhập nội dung, bấm gửi
+UI -> UI : Hiển thị optimistic message
+UI -> API : POST /messages
+API -> DB : INSERT messages
+DB --> API : Bản ghi tin nhắn
+API --> UI : 201 Created
+DB -> RT : Phát sự kiện INSERT
+RT --> UI : Realtime event
+RT --> Receiver : Realtime event
+UI -> UI : Thay local message bằng server message
+Receiver -> Receiver : Hiển thị tin nhắn mới
+@enduml

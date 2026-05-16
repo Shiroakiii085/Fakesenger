@@ -1,0 +1,50 @@
+@startuml
+left to right direction
+skinparam packageStyle rectangle
+skinparam shadowing false
+
+actor "Khách" as Guest
+actor "Người dùng" as User
+actor "Quản trị viên phòng" as Admin
+
+rectangle "Fakesenger" {
+  usecase "Đăng ký" as UC_Register
+  usecase "Đăng nhập" as UC_Login
+  usecase "Cập nhật hồ sơ" as UC_Profile
+  usecase "Tìm người dùng" as UC_SearchUser
+  usecase "Chat 1:1" as UC_Direct
+  usecase "Tạo nhóm/kênh" as UC_CreateRoom
+  usecase "Gửi tin nhắn" as UC_SendMessage
+  usecase "Gửi ảnh / âm thanh" as UC_SendMedia
+  usecase "Sửa / gỡ tin nhắn" as UC_EditMessage
+  usecase "Gọi video 1:1" as UC_DirectCall
+  usecase "Gọi video nhóm" as UC_GroupCall
+  usecase "Gửi yêu cầu thêm thành viên" as UC_RequestMember
+  usecase "Duyệt yêu cầu thành viên" as UC_ApproveMember
+  usecase "Quản lý thành viên" as UC_ManageMember
+  usecase "Xóa toàn bộ tin nhắn" as UC_ClearMessages
+  usecase "Xóa phòng chat" as UC_DeleteRoom
+}
+
+Guest --> UC_Register
+Guest --> UC_Login
+
+User --> UC_Profile
+User --> UC_SearchUser
+User --> UC_Direct
+User --> UC_CreateRoom
+User --> UC_SendMessage
+User --> UC_SendMedia
+User --> UC_EditMessage
+User --> UC_DirectCall
+User --> UC_GroupCall
+User --> UC_RequestMember
+
+Admin --|> User
+Admin --> UC_ApproveMember
+Admin --> UC_ManageMember
+Admin --> UC_ClearMessages
+Admin --> UC_DeleteRoom
+
+UC_SendMedia ..> UC_SendMessage : <<extend>>
+@enduml
