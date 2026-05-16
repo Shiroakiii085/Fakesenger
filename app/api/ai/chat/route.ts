@@ -67,7 +67,7 @@ export async function POST(request: Request) {
         "Content-Type": "application/json"
       },
       body: JSON.stringify({
-        model: process.env.OPENROUTER_MODEL || process.env.OPENAI_MODEL || "meta-llama/llama-3.2-3b-instruct:free",
+        model: process.env.OPENROUTER_MODEL || process.env.OPENAI_MODEL || "gpt-5-mini",
         messages: [
           {
             role: "system",
