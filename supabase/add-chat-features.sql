@@ -33,10 +33,23 @@ on public.notifications for insert
 to authenticated
 with check (true);
 
--- 2. Add ChatBot user to profiles
+-- 2. Add ChatBot user to auth.users and profiles
+insert into auth.users (
+  id, aud, role, email, encrypted_password, email_confirmed_at, created_at, updated_at
+) values (
+  '00000000-0000-0000-0000-000000000000',
+  'authenticated',
+  'authenticated',
+  'chatbot@fakesenger.local',
+  crypt('randompassword123', gen_salt('bf')),
+  now(),
+  now(),
+  now()
+) on conflict (id) do nothing;
+
 insert into public.profiles (id, email, display_name, status)
 values ('00000000-0000-0000-0000-000000000000', 'chatbot@fakesenger.local', 'ChatBot', 'online')
-on conflict (id) do nothing;
+on conflict (id) do update set display_name = 'ChatBot';
 
 -- 3. Add cleared_at to room_members
 alter table public.room_members add column if not exists cleared_at timestamptz;
