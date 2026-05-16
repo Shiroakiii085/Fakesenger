@@ -506,6 +506,29 @@ label {
   color: rgba(255, 255, 255, 0.72);
 }
 
+.ai-room-item {
+  border-color: rgba(247, 197, 72, 0.24);
+  background:
+    linear-gradient(135deg, rgba(247, 197, 72, 0.18), rgba(47, 191, 143, 0.12)),
+    #fffdfa;
+}
+
+.room-item.ai-room-item.selected {
+  background:
+    linear-gradient(135deg, rgba(247, 197, 72, 0.24), transparent 42%),
+    var(--coal);
+}
+
+.ai-symbol {
+  color: #7c5d00;
+  background: rgba(247, 197, 72, 0.22);
+}
+
+.room-item.selected .ai-symbol {
+  color: white;
+  background: rgba(247, 197, 72, 0.24);
+}
+
 
 
 .room-symbol {
@@ -630,6 +653,18 @@ label {
   background: var(--mint-dark);
   color: white;
   border-color: var(--mint-dark);
+}
+
+.ai-bubble {
+  border-color: rgba(247, 197, 72, 0.32);
+  background:
+    linear-gradient(135deg, rgba(247, 197, 72, 0.14), rgba(255, 255, 255, 0.9)),
+    white;
+}
+
+.ai-avatar {
+  color: #7c5d00;
+  background: rgba(247, 197, 72, 0.22);
 }
 
 .message-row.pending .bubble {
@@ -827,6 +862,21 @@ label {
   padding: 16px 20px 20px;
   border-top: 1px solid var(--line);
   background: rgba(255, 255, 255, 0.76);
+}
+
+.ai-composer {
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+
+.ai-header .role-badge,
+.ai-badge {
+  border-color: rgba(247, 197, 72, 0.7);
+  color: #7c5d00;
+  background: rgba(247, 197, 72, 0.18);
+}
+
+.ai-empty-state svg {
+  color: #7c5d00;
 }
 
 

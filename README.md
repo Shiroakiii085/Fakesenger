@@ -19,6 +19,7 @@ Web chat realtime như Messenger ở mức sinh viên, tách rõ backend và fro
 - Tạo nhóm/kênh và thêm thành viên.
 - Tin nhắn realtime qua Supabase Realtime.
 - Cập nhật tên hiển thị và trạng thái.
+- Trợ lý AI qua OpenRouter, dùng router tự chọn model phù hợp theo từng câu hỏi.
 
 ## Chạy local
 
@@ -30,7 +31,11 @@ Web chat realtime như Messenger ở mức sinh viên, tách rõ backend và fro
 ```bash
 NEXT_PUBLIC_SUPABASE_URL=...
 NEXT_PUBLIC_SUPABASE_ANON_KEY=...
+OPENROUTER_API_KEY=...
+OPENROUTER_MODEL=openrouter/auto
 ```
+
+`OPENROUTER_SITE_URL` và `OPENROUTER_APP_NAME` là tuỳ chọn; có thể giữ mặc định trong `.env.example`.
 
 5. Cài và chạy:
 
@@ -46,6 +51,8 @@ npm run dev
 3. Thêm các biến môi trường:
    - `NEXT_PUBLIC_SUPABASE_URL`
    - `NEXT_PUBLIC_SUPABASE_ANON_KEY`
+   - `OPENROUTER_API_KEY`
+   - `OPENROUTER_MODEL`
 4. Deploy.
 
 Không cần server riêng. Vercel và Supabase vẫn có thể chạy trong free tier.

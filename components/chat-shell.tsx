@@ -19,6 +19,7 @@ import {
   Send,
   Settings,
   Shield,
+  Sparkles,
   UserMinus,
   Video,
   Users,
@@ -32,6 +33,15 @@ import type { MemberRequest, Message, Profile, Room, RoomMember, RoomType } from
 type ApiOptions = {
   method?: string;
   body?: unknown;
+};
+
+type AiChatMessage = {
+  id: string;
+  role: "user" | "assistant";
+  content: string;
+  createdAt: string;
+  pending?: boolean;
+  model?: string;
 };
 
 
@@ -299,6 +309,11 @@ export function ChatShell() {
   const [memberRequests, setMemberRequests] = useState<MemberRequest[]>([]);
   const [isMemberActionBusy, setIsMemberActionBusy] = useState(false);
   const [isMobileRoomsOpen, setIsMobileRoomsOpen] = useState(false);
+  const [isAiChatOpen, setIsAiChatOpen] = useState(false);
+  const [aiMessages, setAiMessages] = useState<AiChatMessage[]>([]);
+  const [aiDraft, setAiDraft] = useState("");
+  const [isAiSending, setIsAiSending] = useState(false);
+  const [aiModelUsed, setAiModelUsed] = useState("openrouter/auto");
   const [openMessageMenuId, setOpenMessageMenuId] = useState<string | null>(null);
   const [messageMenuDirection, setMessageMenuDirection] = useState<"up" | "down">("down");
   const [editingMessageId, setEditingMessageId] = useState<string | null>(null);
@@ -336,6 +351,7 @@ export function ChatShell() {
     () => rooms.find((room) => room.id === activeRoomId) ?? null,
     [rooms, activeRoomId]
   );
+  const hasActiveConversation = Boolean(activeRoom || isAiChatOpen);
 
   const callRoom = useMemo(
     () => rooms.find((room) => room.id === callRoomId) ?? null,
@@ -535,6 +551,10 @@ export function ChatShell() {
         setProfile(null);
         setRooms([]);
         setMessages([]);
+        setAiMessages([]);
+        setAiDraft("");
+        setIsAiChatOpen(false);
+        setAiModelUsed("openrouter/auto");
         setActiveRoomId(null);
         setIsAccountMenuOpen(false);
         setIsAuthLoading(false);
@@ -744,7 +764,7 @@ export function ChatShell() {
   useEffect(() => {
     if (!shouldStickToBottomRef.current) return;
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages.length]);
+  }, [aiMessages.length, messages.length]);
 
   useEffect(() => {
     shouldStickToBottomRef.current = true;
@@ -873,6 +893,10 @@ export function ChatShell() {
         setProfile(null);
         setRooms([]);
         setMessages([]);
+        setAiMessages([]);
+        setAiDraft("");
+        setIsAiChatOpen(false);
+        setAiModelUsed("openrouter/auto");
         setActiveRoomId(null);
         setAuthMode("login");
         setPassword("");
@@ -895,6 +919,7 @@ export function ChatShell() {
         body: { targetUserId }
       });
       await loadRooms();
+      setIsAiChatOpen(false);
       setActiveRoomId(data.room.id);
       setIsMobileRoomsOpen(false);
       setSearchQuery("");
@@ -930,6 +955,7 @@ export function ChatShell() {
       setSelectedUsers([]);
       setIsRoomComposerOpen(false);
       await loadRooms();
+      setIsAiChatOpen(false);
       setActiveRoomId(data.room.id);
       setIsMobileRoomsOpen(false);
     } catch (error) {
@@ -976,6 +1002,68 @@ export function ChatShell() {
       setMessages((current) => current.filter((message) => message.id !== pendingId));
       setMessageDraft(body);
       setNotice(error instanceof Error ? error.message : "Không thể gửi tin nhắn.");
+    }
+  }
+
+  function openAiChat() {
+    setIsAiChatOpen(true);
+    setActiveRoomId(null);
+    setIsDetailsOpen(false);
+    setIsMobileRoomsOpen(false);
+  }
+
+  async function sendAiMessage(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const content = aiDraft.trim();
+    if (!content || isAiSending) return;
+
+    const userMessage: AiChatMessage = {
+      id: `ai-user-${Date.now()}`,
+      role: "user",
+      content,
+      createdAt: new Date().toISOString()
+    };
+    const pendingMessage: AiChatMessage = {
+      id: `ai-pending-${Date.now()}`,
+      role: "assistant",
+      content: "Đang suy nghĩ...",
+      createdAt: new Date().toISOString(),
+      pending: true
+    };
+    const requestMessages = [...aiMessages, userMessage].map(({ role, content: messageContent }) => ({
+      role,
+      content: messageContent
+    }));
+
+    setAiDraft("");
+    setIsAiSending(true);
+    setAiMessages((current) => [...current, userMessage, pendingMessage]);
+
+    try {
+      const data = await authFetch<{ message: string; model: string }>("/api/ai/chat", {
+        method: "POST",
+        body: { messages: requestMessages }
+      });
+
+      setAiMessages((current) =>
+        current.map((message) =>
+          message.id === pendingMessage.id
+            ? {
+                ...message,
+                content: data.message,
+                pending: false,
+                model: data.model
+              }
+            : message
+        )
+      );
+      setAiModelUsed(data.model);
+    } catch (error) {
+      setAiMessages((current) => current.filter((message) => message.id !== pendingMessage.id));
+      setAiDraft(content);
+      setNotice(error instanceof Error ? error.message : "Không thể gửi câu hỏi cho trợ lý AI.");
+    } finally {
+      setIsAiSending(false);
     }
   }
 
@@ -1551,7 +1639,7 @@ export function ChatShell() {
   return (
     <main
       className={`chat-page ${isDetailsOpen && activeRoom && activeRoom.type !== "direct" ? "with-details" : ""} ${
-        isMobileRoomsOpen || !activeRoom ? "mobile-rooms-open" : ""
+        isMobileRoomsOpen || !hasActiveConversation ? "mobile-rooms-open" : ""
       }`}
     >
       <aside className="sidebar">
@@ -1649,6 +1737,15 @@ export function ChatShell() {
         </div>
 
         <div className="room-list">
+          <button type="button" className={`room-item ai-room-item ${isAiChatOpen ? "selected" : ""}`} onClick={openAiChat}>
+            <span className="room-symbol ai-symbol">
+              <Sparkles size={17} />
+            </span>
+            <span className="room-meta">
+              <strong>Trợ lý AI</strong>
+              <small>OpenRouter tự chọn model phù hợp</small>
+            </span>
+          </button>
 
           {visibleRooms.map((room) => (
             <button
@@ -1656,6 +1753,7 @@ export function ChatShell() {
               type="button"
               className={`room-item ${room.id === activeRoomId ? "selected" : ""}`}
               onClick={() => {
+                setIsAiChatOpen(false);
                 setActiveRoomId(room.id);
                 setIsMobileRoomsOpen(false);
               }}
@@ -1678,7 +1776,71 @@ export function ChatShell() {
       </aside>
 
       <section className="conversation">
-        {activeRoom ? (
+        {isAiChatOpen ? (
+          <>
+            <header className="conversation-header ai-header">
+              <div className="header-title">
+                <button
+                  className="icon-button mobile-room-toggle"
+                  type="button"
+                  title="Danh sach phong"
+                  onClick={() => setIsMobileRoomsOpen(true)}
+                >
+                  <Menu size={18} />
+                </button>
+                <span className="room-symbol large ai-symbol">
+                  <Sparkles size={18} />
+                </span>
+                <div>
+                  <h2>Trợ lý AI</h2>
+                  <p>Model hiện dùng: {aiModelUsed}</p>
+                </div>
+              </div>
+              <span className="role-badge ai-badge">OpenRouter</span>
+            </header>
+
+            <div className="messages" ref={messagesRef} onScroll={handleMessagesScroll}>
+              {aiMessages.map((message) => {
+                const mine = message.role === "user";
+                return (
+                  <article key={message.id} className={`message-row ${mine ? "mine" : ""} ${message.pending ? "pending" : ""}`}>
+                    {!mine && (
+                      <span className="avatar ai-avatar">
+                        <Sparkles size={16} />
+                      </span>
+                    )}
+                    <div className={`bubble ${!mine ? "ai-bubble" : ""}`}>
+                      {!mine && <strong>Trợ lý AI</strong>}
+                      <p>{message.content}</p>
+                      <time>{message.pending ? "Đang trả lời" : formatTime(message.createdAt)}</time>
+                    </div>
+                  </article>
+                );
+              })}
+
+              {aiMessages.length === 0 && (
+                <div className="empty-conversation ai-empty-state">
+                  <Sparkles size={34} />
+                  <h3>Hỏi bất cứ điều gì</h3>
+                  <p>Trợ lý AI sẵn sàng giải thích, gợi ý và giúp bạn suy nghĩ nhanh hơn.</p>
+                </div>
+              )}
+              <div ref={messagesEndRef} />
+            </div>
+
+            <form className="composer ai-composer" onSubmit={sendAiMessage}>
+              <input
+                value={aiDraft}
+                onChange={(event) => setAiDraft(event.target.value)}
+                placeholder="Hỏi trợ lý AI..."
+                disabled={isAiSending}
+              />
+              <button className="send-button" type="submit" disabled={!aiDraft.trim() || isAiSending} title="Gửi">
+                <Send size={19} />
+              </button>
+            </form>
+          </>
+        ) : activeRoom ? (
           <>
             <header className="conversation-header">
               <div className="header-title">
