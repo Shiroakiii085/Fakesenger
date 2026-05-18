@@ -26,7 +26,9 @@ Web chat realtime như Messenger ở mức sinh viên, tách rõ backend và fro
 1. Tạo project Supabase mới.
 2. Vào Supabase SQL Editor, chạy toàn bộ file `supabase/schema.sql`.
 3. Vào Authentication > Providers > Email, có thể tắt Confirm email để demo sinh viên nhanh hơn.
-4. Copy `.env.example` thành `.env.local` và điền:
+4. Nếu bạn đang nâng cấp từ bản cũ đã có database, chạy thêm file `supabase/add-ai-chat-jobs.sql` để bật chế độ tiếp tục xử lý câu hỏi AI khi người dùng rời tab.
+
+5. Copy `.env.example` thành `.env.local` và điền:
 
 ```bash
 NEXT_PUBLIC_SUPABASE_URL=...
@@ -38,7 +40,7 @@ OPENROUTER_MODEL=openai/gpt-oss-120b:free
 `OPENROUTER_SITE_URL` và `OPENROUTER_APP_NAME` là tuỳ chọn; có thể giữ mặc định trong `.env.example`.
 Web search của OpenRouter là tính năng riêng và có thể phát sinh phí tìm kiếm nhỏ nếu model gọi công cụ này, dù bản thân model đang dùng là free.
 
-5. Cài và chạy:
+6. Cài và chạy:
 
 ```bash
 npm install

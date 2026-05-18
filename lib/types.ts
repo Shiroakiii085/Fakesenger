@@ -57,3 +57,14 @@ export type MemberRequest = {
   requester: Profile | null;
   target: Profile | null;
 };
+
+export type AppNotification = {
+  id: string;
+  user_id: string;
+  actor_id: string | null;
+  room_id: string | null;
+  type: "mention" | "system";
+  message: string;
+  is_read: boolean;
+  created_at: string;
+};

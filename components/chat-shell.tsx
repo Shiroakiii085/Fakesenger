@@ -20,6 +20,7 @@ import {
   Settings,
   Shield,
   Sparkles,
+  Smile,
   UserMinus,
   Video,
   Users,
@@ -33,6 +34,7 @@ import type { MemberRequest, Message, Profile, Room, RoomMember, RoomType } from
 type ApiOptions = {
   method?: string;
   body?: unknown;
+  keepalive?: boolean;
 };
 
 type AiChatMessage = {
@@ -47,6 +49,21 @@ type AiChatMessage = {
     url: string;
   }>;
 };
+
+type AiChatJobResponse = {
+  requestId: string;
+  status: "pending" | "processing" | "completed" | "failed";
+  message: string | null;
+  model: string | null;
+  sources: Array<{
+    title: string;
+    url: string;
+  }>;
+  error: string | null;
+};
+
+const QUICK_EMOJIS = ["😀", "😂", "😍", "🥳", "😎", "😭", "🙏", "🔥", "❤️", "👍", "🎉", "🤝"];
+const QUICK_STICKERS = ["🥰", "🚀", "💯", "👏", "🤯", "🫶", "😴", "🎯"];
 
 
 
@@ -318,6 +335,9 @@ export function ChatShell() {
   const [aiMessages, setAiMessages] = useState<AiChatMessage[]>([]);
   const [aiDraft, setAiDraft] = useState("");
   const [isAiSending, setIsAiSending] = useState(false);
+  const [pendingAiRequestId, setPendingAiRequestId] = useState<string | null>(null);
+  const [unreadNotificationCount, setUnreadNotificationCount] = useState(0);
+  const [isEmojiTrayOpen, setIsEmojiTrayOpen] = useState(false);
   const [openMessageMenuId, setOpenMessageMenuId] = useState<string | null>(null);
   const [messageMenuDirection, setMessageMenuDirection] = useState<"up" | "down">("down");
   const [editingMessageId, setEditingMessageId] = useState<string | null>(null);
@@ -400,7 +420,8 @@ export function ChatShell() {
           Authorization: `Bearer ${token}`,
           "Content-Type": "application/json"
         },
-        body: options.body ? JSON.stringify(options.body) : undefined
+        body: options.body ? JSON.stringify(options.body) : undefined,
+        keepalive: options.keepalive
       });
 
       const data = await response.json().catch(() => ({}));
@@ -415,6 +436,41 @@ export function ChatShell() {
     },
     []
   );
+
+  const loadUnreadNotificationCount = useCallback(async () => {
+    const data = await authFetch<{ unreadCount: number }>("/api/notifications");
+    setUnreadNotificationCount(data.unreadCount);
+  }, [authFetch]);
+
+  const settleAiJob = useCallback((job: AiChatJobResponse) => {
+    if (job.status !== "completed" && job.status !== "failed") return false;
+
+    const pendingMessageId = `ai-pending-${job.requestId}`;
+    setAiMessages((current) =>
+      current.map((message) =>
+        message.id === pendingMessageId
+          ? {
+              ...message,
+              content:
+                job.status === "completed"
+                  ? job.message || "Tr\u1ee3 l\u00fd \u0111\u00e3 x\u1eed l\u00fd xong nh\u01b0ng kh\u00f4ng tr\u1ea3 v\u1ec1 n\u1ed9i dung."
+                  : job.error || "Kh\u00f4ng th\u1ec3 x\u1eed l\u00fd c\u00e2u h\u1ecfi n\u00e0y.",
+              pending: false,
+              model: job.model || undefined,
+              sources: job.sources
+            }
+          : message
+      )
+    );
+    setPendingAiRequestId(null);
+    setIsAiSending(false);
+
+    if (job.status === "failed") {
+      setNotice(job.error || "Kh\u00f4ng th\u1ec3 g\u1eedi c\u00e2u h\u1ecfi cho tr\u1ee3 l\u00fd AI.");
+    }
+
+    return true;
+  }, []);
 
   const getRoomTitle = useCallback(
     (room: Room) => {
@@ -774,6 +830,115 @@ export function ChatShell() {
     messagesEndRef.current?.scrollIntoView({ behavior: "auto" });
   }, [activeRoomId]);
 
+  useEffect(() => {
+    if (!session) return;
+    loadUnreadNotificationCount().catch((error) => {
+      if (!shouldIgnoreBackgroundError(error)) setNotice(error.message);
+    });
+  }, [loadUnreadNotificationCount, session]);
+
+  useEffect(() => {
+    document.title = unreadNotificationCount > 0 ? `(${unreadNotificationCount}) Fakesenger` : "Fakesenger";
+  }, [unreadNotificationCount]);
+
+  useEffect(() => {
+    if (!isSupabaseConfigured || !profile?.id) return;
+
+    const notificationsChannel = supabase
+      .channel(`notifications-${profile.id}`)
+      .on(
+        "postgres_changes",
+        { event: "INSERT", schema: "public", table: "notifications", filter: `user_id=eq.${profile.id}` },
+        () => setUnreadNotificationCount((current) => current + 1)
+      )
+      .on(
+        "postgres_changes",
+        { event: "UPDATE", schema: "public", table: "notifications", filter: `user_id=eq.${profile.id}` },
+        () => {
+          loadUnreadNotificationCount().catch((error) => {
+            if (!shouldIgnoreBackgroundError(error)) setNotice(error.message);
+          });
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(notificationsChannel);
+    };
+  }, [isSupabaseConfigured, loadUnreadNotificationCount, profile?.id, supabase]);
+
+  useEffect(() => {
+    if (!session) return;
+
+    const resumeFromBackground = () => {
+      if (document.visibilityState !== "visible") return;
+      loadRooms().catch((error) => {
+        if (!shouldIgnoreBackgroundError(error)) setNotice(error.message);
+      });
+      loadUnreadNotificationCount().catch((error) => {
+        if (!shouldIgnoreBackgroundError(error)) setNotice(error.message);
+      });
+      if (activeRoomRef.current) {
+        loadMessages(activeRoomRef.current.id).catch((error) => {
+          if (!shouldIgnoreBackgroundError(error)) setNotice(error.message);
+        });
+      }
+    };
+
+    document.addEventListener("visibilitychange", resumeFromBackground);
+    window.addEventListener("pageshow", resumeFromBackground);
+    window.addEventListener("online", resumeFromBackground);
+
+    return () => {
+      document.removeEventListener("visibilitychange", resumeFromBackground);
+      window.removeEventListener("pageshow", resumeFromBackground);
+      window.removeEventListener("online", resumeFromBackground);
+    };
+  }, [loadMessages, loadRooms, loadUnreadNotificationCount, session]);
+
+  useEffect(() => {
+    if (!pendingAiRequestId || !session) return;
+
+    let cancelled = false;
+    let timeoutId: number | undefined;
+
+    const pollPendingJob = async () => {
+      try {
+        const job = await authFetch<AiChatJobResponse>(
+          `/api/ai/chat?requestId=${encodeURIComponent(pendingAiRequestId)}`
+        );
+        if (cancelled || settleAiJob(job)) return;
+      } catch {
+        // On mobile, a background tab can break the open request; quietly ask the backend again when possible.
+      }
+
+      if (!cancelled) {
+        timeoutId = window.setTimeout(
+          pollPendingJob,
+          document.visibilityState === "visible" ? 1800 : 5000
+        );
+      }
+    };
+
+    timeoutId = window.setTimeout(pollPendingJob, 1500);
+
+    const resumePolling = () => {
+      if (document.visibilityState !== "visible") return;
+      if (timeoutId) window.clearTimeout(timeoutId);
+      void pollPendingJob();
+    };
+
+    document.addEventListener("visibilitychange", resumePolling);
+    window.addEventListener("online", resumePolling);
+
+    return () => {
+      cancelled = true;
+      if (timeoutId) window.clearTimeout(timeoutId);
+      document.removeEventListener("visibilitychange", resumePolling);
+      window.removeEventListener("online", resumePolling);
+    };
+  }, [authFetch, pendingAiRequestId, session, settleAiJob]);
+
   function handleMessagesScroll() {
     const element = messagesRef.current;
     if (!element) return;
@@ -965,11 +1130,9 @@ export function ChatShell() {
     }
   }
 
-  async function sendMessage(event: React.FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    if (!activeRoom || !profile || !messageDraft.trim() || !canSend) return;
+  async function submitTextMessage(body: string) {
+    if (!activeRoom || !profile || !body.trim() || !canSend) return;
 
-    const body = messageDraft;
     const pendingId = `local-${Date.now()}-${Math.random().toString(36).slice(2)}`;
     const pendingMessage: Message = {
       id: pendingId,
@@ -986,7 +1149,6 @@ export function ChatShell() {
       profiles: profile
     };
 
-    setMessageDraft("");
     setMessages((current) => appendUniqueMessage(current, pendingMessage));
 
     try {
@@ -1002,9 +1164,34 @@ export function ChatShell() {
       );
     } catch (error) {
       setMessages((current) => current.filter((message) => message.id !== pendingId));
-      setMessageDraft(body);
       setNotice(error instanceof Error ? error.message : "Không thể gửi tin nhắn.");
     }
+  }
+
+  async function sendMessage(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const body = messageDraft;
+    setMessageDraft("");
+    await submitTextMessage(body);
+  }
+
+  async function markNotificationsRead() {
+    if (!unreadNotificationCount) return;
+    try {
+      await authFetch("/api/notifications", { method: "PATCH" });
+      setUnreadNotificationCount(0);
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "Không thể cập nhật thông báo.");
+    }
+  }
+
+  function appendEmoji(emoji: string) {
+    setMessageDraft((current) => `${current}${emoji}`);
+  }
+
+  async function sendSticker(sticker: string) {
+    await submitTextMessage(sticker);
+    setIsEmojiTrayOpen(false);
   }
 
   function openAiChat() {
@@ -1019,16 +1206,17 @@ export function ChatShell() {
     const content = aiDraft.trim();
     if (!content || isAiSending) return;
 
+    const requestId = crypto.randomUUID();
     const userMessage: AiChatMessage = {
-      id: `ai-user-${Date.now()}`,
+      id: `ai-user-${requestId}`,
       role: "user",
       content,
       createdAt: new Date().toISOString()
     };
     const pendingMessage: AiChatMessage = {
-      id: `ai-pending-${Date.now()}`,
+      id: `ai-pending-${requestId}`,
       role: "assistant",
-      content: "Đang suy nghĩ...",
+      content: "\u0110ang suy ngh\u0129...",
       createdAt: new Date().toISOString(),
       pending: true
     };
@@ -1039,40 +1227,23 @@ export function ChatShell() {
 
     setAiDraft("");
     setIsAiSending(true);
+    setPendingAiRequestId(requestId);
     setAiMessages((current) => [...current, userMessage, pendingMessage]);
 
     try {
-      const data = await authFetch<{
-        message: string;
-        model: string;
-        sources?: Array<{
-          title: string;
-          url: string;
-        }>;
-      }>("/api/ai/chat", {
+      const job = await authFetch<AiChatJobResponse>("/api/ai/chat", {
         method: "POST",
-        body: { messages: requestMessages }
+        body: { requestId, messages: requestMessages },
+        keepalive: true
       });
 
-      setAiMessages((current) =>
-        current.map((message) =>
-          message.id === pendingMessage.id
-            ? {
-                ...message,
-                content: data.message,
-                pending: false,
-                model: data.model,
-                sources: data.sources
-              }
-            : message
-        )
-      );
+      settleAiJob(job);
     } catch (error) {
-      setAiMessages((current) => current.filter((message) => message.id !== pendingMessage.id));
-      setAiDraft(content);
-      setNotice(error instanceof Error ? error.message : "Không thể gửi câu hỏi cho trợ lý AI.");
-    } finally {
-      setIsAiSending(false);
+      setNotice(
+        error instanceof Error
+          ? `${error.message} Tr\u1ee3 l\u00fd v\u1eabn s\u1ebd ti\u1ebfp t\u1ee5c x\u1eed l\u00fd n\u1ebfu y\u00eau c\u1ea7u \u0111\u00e3 t\u1edbi m\u00e1y ch\u1ee7.`
+          : "K\u1ebft n\u1ed1i b\u1ecb gi\u00e1n \u0111o\u1ea1n. Tr\u1ee3 l\u00fd v\u1eabn s\u1ebd ti\u1ebfp t\u1ee5c x\u1eed l\u00fd n\u1ebfu y\u00eau c\u1ea7u \u0111\u00e3 t\u1edbi m\u00e1y ch\u1ee7."
+      );
     }
   }
 
@@ -1658,13 +1829,23 @@ export function ChatShell() {
             <strong>{profile.display_name}</strong>
             <span>{profile.status || "online"}</span>
           </div>
-          <button
-            className={`icon-button ${isAccountMenuOpen ? "dark" : ""}`}
-            title="Tài khoản"
-            onClick={() => setIsAccountMenuOpen((open) => !open)}
-          >
-            <Settings size={18} />
-          </button>
+          <div className="sidebar-actions">
+            <button
+              className="icon-button notification-button"
+              title="Thông báo mới"
+              onClick={markNotificationsRead}
+            >
+              <Bell size={18} />
+              {unreadNotificationCount > 0 && <span>{unreadNotificationCount > 99 ? "99+" : unreadNotificationCount}</span>}
+            </button>
+            <button
+              className={`icon-button ${isAccountMenuOpen ? "dark" : ""}`}
+              title="Tài khoản"
+              onClick={() => setIsAccountMenuOpen((open) => !open)}
+            >
+              <Settings size={18} />
+            </button>
+          </div>
         </div>
 
         {isAccountMenuOpen && (
@@ -1913,11 +2094,12 @@ export function ChatShell() {
                 messages.map((message) => {
                   const mine = message.user_id === profile.id;
                   const pending = isLocalMessage(message);
+                  const isStickerMessage = message.kind === "text" && QUICK_STICKERS.includes(message.body);
                   return (
                     <article key={message.id} className={`message-row ${mine ? "mine" : ""} ${pending ? "pending" : ""}`}>
                       {!mine && <Avatar profile={message.profiles} />}
                       <div
-                        className={`bubble ${message.kind === "image" ? "media-bubble" : ""}`}
+                        className={`bubble ${message.kind === "image" ? "image-shell" : ""} ${isStickerMessage ? "sticker-bubble" : ""}`}
                         onClick={(event) => {
                           if (!pending && !message.is_deleted) toggleMessageMenu(event, message.id);
                         }}
@@ -2007,6 +2189,15 @@ export function ChatShell() {
               >
                 <Mic size={18} />
               </button>
+              <button
+                className={`icon-button composer-tool ${isEmojiTrayOpen ? "dark" : ""}`}
+                type="button"
+                title="Emoji và sticker"
+                onClick={() => setIsEmojiTrayOpen((open) => !open)}
+                disabled={!canSend}
+              >
+                <Smile size={18} />
+              </button>
               <input
                 value={messageDraft}
                 onChange={(event) => setMessageDraft(event.target.value)}
@@ -2016,6 +2207,30 @@ export function ChatShell() {
               <button className="send-button" type="submit" disabled={!canSend || !messageDraft.trim()} title="Gửi">
                 <Send size={19} />
               </button>
+              {isEmojiTrayOpen && (
+                <div className="emoji-tray">
+                  <div>
+                    <strong>Emoji</strong>
+                    <div className="emoji-grid">
+                      {QUICK_EMOJIS.map((emoji) => (
+                        <button key={emoji} type="button" onClick={() => appendEmoji(emoji)}>
+                          {emoji}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                  <div>
+                    <strong>Sticker</strong>
+                    <div className="sticker-grid">
+                      {QUICK_STICKERS.map((sticker) => (
+                        <button key={sticker} type="button" onClick={() => sendSticker(sticker)}>
+                          {sticker}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              )}
             </form>
 
             {editingMessageId && (

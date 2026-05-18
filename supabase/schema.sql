@@ -82,6 +82,19 @@ create table if not exists public.member_requests (
   constraint member_requests_no_self_request check (requester_id <> target_user_id)
 );
 
+create table if not exists public.ai_chat_jobs (
+  id uuid primary key,
+  user_id uuid not null references public.profiles(id) on delete cascade,
+  request_messages jsonb not null,
+  status text not null default 'pending' check (status in ('pending', 'processing', 'completed', 'failed')),
+  response_message text,
+  response_model text,
+  response_sources jsonb not null default '[]'::jsonb,
+  error_message text,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
 create index if not exists idx_room_members_user_id on public.room_members(user_id);
 create index if not exists idx_room_members_room_id on public.room_members(room_id);
 create index if not exists idx_messages_room_created on public.messages(room_id, created_at);
@@ -90,6 +103,7 @@ create index if not exists idx_member_requests_room_status on public.member_requ
 create unique index if not exists idx_member_requests_pending_unique
 on public.member_requests(room_id, target_user_id)
 where status = 'pending';
+create index if not exists idx_ai_chat_jobs_user_created on public.ai_chat_jobs(user_id, created_at desc);
 create index if not exists idx_profiles_search on public.profiles using gin (
   to_tsvector('simple', coalesce(display_name, '') || ' ' || coalesce(email, ''))
 );
@@ -148,6 +162,11 @@ create trigger touch_rooms_updated_at
   before update on public.rooms
   for each row execute function public.touch_updated_at();
 
+drop trigger if exists touch_ai_chat_jobs_updated_at on public.ai_chat_jobs;
+create trigger touch_ai_chat_jobs_updated_at
+  before update on public.ai_chat_jobs
+  for each row execute function public.touch_updated_at();
+
 drop trigger if exists touch_room_after_message_insert on public.messages;
 create trigger touch_room_after_message_insert
   after insert on public.messages
@@ -185,6 +204,7 @@ alter table public.room_members enable row level security;
 alter table public.messages enable row level security;
 alter table public.message_hides enable row level security;
 alter table public.member_requests enable row level security;
+alter table public.ai_chat_jobs enable row level security;
 
 drop policy if exists "profiles are visible to authenticated users" on public.profiles;
 create policy "profiles are visible to authenticated users"
@@ -321,6 +341,25 @@ on public.member_requests for update
 to authenticated
 using (public.is_room_admin(room_id, auth.uid()))
 with check (public.is_room_admin(room_id, auth.uid()));
+
+drop policy if exists "users can read own ai chat jobs" on public.ai_chat_jobs;
+create policy "users can read own ai chat jobs"
+on public.ai_chat_jobs for select
+to authenticated
+using (user_id = auth.uid());
+
+drop policy if exists "users can create own ai chat jobs" on public.ai_chat_jobs;
+create policy "users can create own ai chat jobs"
+on public.ai_chat_jobs for insert
+to authenticated
+with check (user_id = auth.uid());
+
+drop policy if exists "users can update own ai chat jobs" on public.ai_chat_jobs;
+create policy "users can update own ai chat jobs"
+on public.ai_chat_jobs for update
+to authenticated
+using (user_id = auth.uid())
+with check (user_id = auth.uid());
 
 do $$
 begin
