@@ -42,9 +42,11 @@ type AiChatJobRow = {
   updated_at: string;
 };
 
-const DEFAULT_MODEL = process.env.OPENROUTER_MODEL || "openai/gpt-oss-120b:free";
+const configuredModel = process.env.OPENROUTER_MODEL;
+const DEFAULT_MODEL =
+  configuredModel && configuredModel !== "openai/gpt-oss-120b:free" ? configuredModel : "openai/gpt-4.1-mini";
 const SYSTEM_PROMPT =
-  "B\u1ea1n l\u00e0 tr\u1ee3 l\u00fd AI trong \u1ee9ng d\u1ee5ng chat Fakesenger. Tr\u1ea3 l\u1eddi b\u1eb1ng ti\u1ebfng Vi\u1ec7t r\u00f5 r\u00e0ng, h\u1eefu \u00edch, l\u1ecbch s\u1ef1. M\u1eb7c \u0111\u1ecbnh tr\u1ea3 l\u1eddi ng\u1eafn g\u1ecdn trong 2-4 c\u00e2u ho\u1eb7c d\u01b0\u1edbi 180 t\u1eeb, ch\u1ec9 chi ti\u1ebft h\u01a1n khi ng\u01b0\u1eddi d\u00f9ng y\u00eau c\u1ea7u. N\u1ebfu ng\u01b0\u1eddi d\u00f9ng h\u1ecfi b\u1eb1ng ng\u00f4n ng\u1eef kh\u00e1c, h\u00e3y tr\u1ea3 l\u1eddi theo ng\u00f4n ng\u1eef \u0111\u00f3. Khi c\u00e2u h\u1ecfi ph\u1ee5 thu\u1ed9c v\u00e0o th\u00f4ng tin m\u1edbi, thay \u0111\u1ed5i theo th\u1eddi gian, ho\u1eb7c c\u1ea7n ki\u1ec3m ch\u1ee9ng tr\u00ean Internet, h\u00e3y ch\u1ee7 \u0111\u1ed9ng d\u00f9ng web search tr\u01b0\u1edbc khi tr\u1ea3 l\u1eddi nh\u01b0ng ch\u1ec9 l\u1ea5y nh\u1eefng ngu\u1ed3n th\u1eadt s\u1ef1 c\u1ea7n thi\u1ebft.";
+  "B\u1ea1n l\u00e0 tr\u1ee3 l\u00fd AI trong \u1ee9ng d\u1ee5ng chat Fakesenger. Tr\u1ea3 l\u1eddi b\u1eb1ng ti\u1ebfng Vi\u1ec7t r\u00f5 r\u00e0ng, h\u1eefu \u00edch, l\u1ecbch s\u1ef1. M\u1eb7c \u0111\u1ecbnh tr\u1ea3 l\u1eddi ng\u1eafn g\u1ecdn trong 2-4 c\u00e2u ho\u1eb7c d\u01b0\u1edbi 180 t\u1eeb, ch\u1ec9 chi ti\u1ebft h\u01a1n khi ng\u01b0\u1eddi d\u00f9ng y\u00eau c\u1ea7u. \u01afu ti\u00ean \u0111\u00fang h\u01a1n nhanh: kh\u00f4ng b\u1ecba th\u00f4ng tin, n\u1ebfu thi\u1ebfu d\u1eef ki\u1ec7n th\u00ec n\u00f3i r\u00f5 \u0111i\u1ec1u ch\u01b0a ch\u1eafc ho\u1eb7c h\u1ecfi l\u1ea1i m\u1ed9t c\u00e2u ng\u1eafn. N\u1ebfu ng\u01b0\u1eddi d\u00f9ng h\u1ecfi b\u1eb1ng ng\u00f4n ng\u1eef kh\u00e1c, h\u00e3y tr\u1ea3 l\u1eddi theo ng\u00f4n ng\u1eef \u0111\u00f3. Khi c\u00e2u h\u1ecfi ph\u1ee5 thu\u1ed9c v\u00e0o th\u00f4ng tin m\u1edbi, thay \u0111\u1ed5i theo th\u1eddi gian, ho\u1eb7c c\u1ea7n ki\u1ec3m ch\u1ee9ng tr\u00ean Internet, h\u00e3y ch\u1ee7 \u0111\u1ed9ng d\u00f9ng web search tr\u01b0\u1edbc khi tr\u1ea3 l\u1eddi nh\u01b0ng ch\u1ec9 l\u1ea5y nh\u1eefng ngu\u1ed3n th\u1eadt s\u1ef1 c\u1ea7n thi\u1ebft.";
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 function requiredEnv(name: string) {
@@ -91,6 +93,25 @@ function extractSources(annotations?: OpenRouterAnnotation[]) {
     .slice(0, 3);
 }
 
+function shouldUseWebSearch(messages: Array<{ role: ChatRole; content: string }>) {
+  const latestQuestion = messages[messages.length - 1]?.content.toLocaleLowerCase("vi-VN") ?? "";
+  return [
+    "hôm nay",
+    "hiện tại",
+    "mới nhất",
+    "latest",
+    "today",
+    "giá",
+    "thời tiết",
+    "tin tức",
+    "lịch",
+    "ai đang",
+    "bao nhiêu",
+    "2025",
+    "2026"
+  ].some((keyword) => latestQuestion.includes(keyword));
+}
+
 function normalizeRequestId(value: unknown) {
   return typeof value === "string" && UUID_PATTERN.test(value) ? value : null;
 }
@@ -120,6 +141,7 @@ async function readJob(request: Request, requestId: string) {
 }
 
 async function requestCompletion(messages: Array<{ role: ChatRole; content: string }>) {
+  const useWebSearch = shouldUseWebSearch(messages);
   const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
     method: "POST",
     headers: {
@@ -131,18 +153,20 @@ async function requestCompletion(messages: Array<{ role: ChatRole; content: stri
     body: JSON.stringify({
       model: DEFAULT_MODEL,
       messages: [{ role: "system", content: SYSTEM_PROMPT }, ...messages],
-      tools: [
-        {
-          type: "openrouter:web_search",
-          parameters: {
-            max_results: 3,
-            max_total_results: 4,
-            search_context_size: "low"
-          }
-        }
-      ],
-      temperature: 0.5,
-      max_completion_tokens: 420
+      tools: useWebSearch
+        ? [
+            {
+              type: "openrouter:web_search",
+              parameters: {
+                max_results: 3,
+                max_total_results: 4,
+                search_context_size: "low"
+              }
+            }
+          ]
+        : undefined,
+      temperature: 0.2,
+      max_completion_tokens: 320
     })
   });
 

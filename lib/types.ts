@@ -26,6 +26,7 @@ export type Room = {
   created_at: string;
   updated_at: string;
   members: RoomMember[];
+  unread_count: number;
 };
 
 export type Message = {
@@ -63,8 +64,10 @@ export type AppNotification = {
   user_id: string;
   actor_id: string | null;
   room_id: string | null;
-  type: "mention" | "system";
+  type: "message" | "mention" | "system";
   message: string;
   is_read: boolean;
   created_at: string;
+  actor: Pick<Profile, "id" | "display_name" | "avatar_url"> | null;
+  room: Pick<Room, "id" | "type" | "name"> | null;
 };

@@ -29,7 +29,7 @@ import {
 import type { Session } from "@supabase/supabase-js";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createBrowserSupabase, hasSupabaseBrowserEnv } from "@/lib/supabase-browser";
-import type { MemberRequest, Message, Profile, Room, RoomMember, RoomType } from "@/lib/types";
+import type { AppNotification, MemberRequest, Message, Profile, Room, RoomMember, RoomType } from "@/lib/types";
 
 type ApiOptions = {
   method?: string;
@@ -337,6 +337,8 @@ export function ChatShell() {
   const [isAiSending, setIsAiSending] = useState(false);
   const [pendingAiRequestId, setPendingAiRequestId] = useState<string | null>(null);
   const [unreadNotificationCount, setUnreadNotificationCount] = useState(0);
+  const [notifications, setNotifications] = useState<AppNotification[]>([]);
+  const [isNotificationMenuOpen, setIsNotificationMenuOpen] = useState(false);
   const [isEmojiTrayOpen, setIsEmojiTrayOpen] = useState(false);
   const [openMessageMenuId, setOpenMessageMenuId] = useState<string | null>(null);
   const [messageMenuDirection, setMessageMenuDirection] = useState<"up" | "down">("down");
@@ -437,9 +439,10 @@ export function ChatShell() {
     []
   );
 
-  const loadUnreadNotificationCount = useCallback(async () => {
-    const data = await authFetch<{ unreadCount: number }>("/api/notifications");
+  const loadNotificationCenter = useCallback(async () => {
+    const data = await authFetch<{ unreadCount: number; notifications: AppNotification[] }>("/api/notifications");
     setUnreadNotificationCount(data.unreadCount);
+    setNotifications(data.notifications);
   }, [authFetch]);
 
   const settleAiJob = useCallback((job: AiChatJobResponse) => {
@@ -507,7 +510,7 @@ export function ChatShell() {
     setRooms(data.rooms);
     setActiveRoomId((current) => {
       if (current && data.rooms.some((room) => room.id === current)) return current;
-      return data.rooms[0]?.id ?? null;
+      return null;
     });
   }, [authFetch]);
 
@@ -832,10 +835,10 @@ export function ChatShell() {
 
   useEffect(() => {
     if (!session) return;
-    loadUnreadNotificationCount().catch((error) => {
+    loadNotificationCenter().catch((error) => {
       if (!shouldIgnoreBackgroundError(error)) setNotice(error.message);
     });
-  }, [loadUnreadNotificationCount, session]);
+  }, [loadNotificationCenter, session]);
 
   useEffect(() => {
     document.title = unreadNotificationCount > 0 ? `(${unreadNotificationCount}) Fakesenger` : "Fakesenger";
@@ -849,13 +852,27 @@ export function ChatShell() {
       .on(
         "postgres_changes",
         { event: "INSERT", schema: "public", table: "notifications", filter: `user_id=eq.${profile.id}` },
-        () => setUnreadNotificationCount((current) => current + 1)
+        (payload) => {
+          const row = payload.new as { room_id?: string | null };
+          if (row.room_id && activeRoomRef.current?.id === row.room_id) {
+            markNotificationsRead(row.room_id).catch(() => undefined);
+          }
+          loadNotificationCenter().catch((error) => {
+            if (!shouldIgnoreBackgroundError(error)) setNotice(error.message);
+          });
+          loadRooms().catch((error) => {
+            if (!shouldIgnoreBackgroundError(error)) setNotice(error.message);
+          });
+        }
       )
       .on(
         "postgres_changes",
         { event: "UPDATE", schema: "public", table: "notifications", filter: `user_id=eq.${profile.id}` },
         () => {
-          loadUnreadNotificationCount().catch((error) => {
+          loadNotificationCenter().catch((error) => {
+            if (!shouldIgnoreBackgroundError(error)) setNotice(error.message);
+          });
+          loadRooms().catch((error) => {
             if (!shouldIgnoreBackgroundError(error)) setNotice(error.message);
           });
         }
@@ -865,7 +882,7 @@ export function ChatShell() {
     return () => {
       supabase.removeChannel(notificationsChannel);
     };
-  }, [isSupabaseConfigured, loadUnreadNotificationCount, profile?.id, supabase]);
+  }, [isSupabaseConfigured, loadNotificationCenter, loadRooms, profile?.id, supabase]);
 
   useEffect(() => {
     if (!session) return;
@@ -875,7 +892,7 @@ export function ChatShell() {
       loadRooms().catch((error) => {
         if (!shouldIgnoreBackgroundError(error)) setNotice(error.message);
       });
-      loadUnreadNotificationCount().catch((error) => {
+      loadNotificationCenter().catch((error) => {
         if (!shouldIgnoreBackgroundError(error)) setNotice(error.message);
       });
       if (activeRoomRef.current) {
@@ -894,7 +911,7 @@ export function ChatShell() {
       window.removeEventListener("pageshow", resumeFromBackground);
       window.removeEventListener("online", resumeFromBackground);
     };
-  }, [loadMessages, loadRooms, loadUnreadNotificationCount, session]);
+  }, [loadMessages, loadNotificationCenter, loadRooms, session]);
 
   useEffect(() => {
     if (!pendingAiRequestId || !session) return;
@@ -1175,14 +1192,21 @@ export function ChatShell() {
     await submitTextMessage(body);
   }
 
-  async function markNotificationsRead() {
-    if (!unreadNotificationCount) return;
+  async function markNotificationsRead(roomId?: string) {
+    if (!unreadNotificationCount && !roomId) return;
     try {
-      await authFetch("/api/notifications", { method: "PATCH" });
-      setUnreadNotificationCount(0);
+      await authFetch("/api/notifications", { method: "PATCH", body: roomId ? { roomId } : undefined });
+      await Promise.all([loadNotificationCenter(), loadRooms()]);
     } catch (error) {
       setNotice(error instanceof Error ? error.message : "Không thể cập nhật thông báo.");
     }
+  }
+
+  function openRoom(roomId: string) {
+    setIsAiChatOpen(false);
+    setActiveRoomId(roomId);
+    setIsMobileRoomsOpen(false);
+    markNotificationsRead(roomId).catch(() => undefined);
   }
 
   function appendEmoji(emoji: string) {
@@ -1819,7 +1843,7 @@ export function ChatShell() {
   return (
     <main
       className={`chat-page ${isDetailsOpen && activeRoom && activeRoom.type !== "direct" ? "with-details" : ""} ${
-        isMobileRoomsOpen || !hasActiveConversation ? "mobile-rooms-open" : ""
+        isMobileRoomsOpen ? "mobile-rooms-open" : ""
       }`}
     >
       <aside className="sidebar">
@@ -1833,7 +1857,7 @@ export function ChatShell() {
             <button
               className="icon-button notification-button"
               title="Thông báo mới"
-              onClick={markNotificationsRead}
+              onClick={() => setIsNotificationMenuOpen((open) => !open)}
             >
               <Bell size={18} />
               {unreadNotificationCount > 0 && <span>{unreadNotificationCount > 99 ? "99+" : unreadNotificationCount}</span>}
@@ -1847,6 +1871,37 @@ export function ChatShell() {
             </button>
           </div>
         </div>
+
+        {isNotificationMenuOpen && (
+          <div className="notification-menu">
+            <div className="notification-menu-header">
+              <strong>Thông báo</strong>
+              <button type="button" onClick={() => markNotificationsRead()}>
+                Đánh dấu đã đọc
+              </button>
+            </div>
+            <div className="notification-feed">
+              {notifications.map((notification) => (
+                <button
+                  key={notification.id}
+                  type="button"
+                  className={notification.is_read ? "read" : "unread"}
+                  onClick={() => {
+                    if (notification.room_id) openRoom(notification.room_id);
+                    setIsNotificationMenuOpen(false);
+                  }}
+                >
+                  <Avatar profile={notification.actor} />
+                  <span>
+                    <strong>{notification.room?.name || notification.actor?.display_name || "Tin nhắn mới"}</strong>
+                    <small>{notification.message}</small>
+                  </span>
+                </button>
+              ))}
+              {notifications.length === 0 && <p>Chưa có thông báo nào.</p>}
+            </div>
+          </div>
+        )}
 
         {isAccountMenuOpen && (
           <div className="account-menu">
@@ -1942,9 +1997,7 @@ export function ChatShell() {
               type="button"
               className={`room-item ${room.id === activeRoomId ? "selected" : ""}`}
               onClick={() => {
-                setIsAiChatOpen(false);
-                setActiveRoomId(room.id);
-                setIsMobileRoomsOpen(false);
+                openRoom(room.id);
               }}
             >
               <span className="room-symbol">{roomIcon(room.type)}</span>
@@ -1952,6 +2005,7 @@ export function ChatShell() {
                 <strong>{getRoomTitle(room)}</strong>
                 <small>{getRoomSubtitle(room)}</small>
               </span>
+              {room.unread_count > 0 && <span className="room-unread-badge">{room.unread_count > 99 ? "99+" : room.unread_count}</span>}
             </button>
           ))}
 
@@ -2256,8 +2310,11 @@ export function ChatShell() {
         ) : (
           <div className="blank-panel">
             <MessageCircle size={42} />
-            <h2>Chọn hoặc tạo một cuộc trò chuyện</h2>
-            <p>Bắt đầu nhắn tin với bạn bè hoặc nhóm của bạn.</p>
+            <h2>Chào mừng trở lại</h2>
+            <p>Chọn một kênh chat ở thanh bên để bắt đầu cuộc trò chuyện.</p>
+            <button type="button" className="primary-action welcome-action" onClick={() => setIsMobileRoomsOpen(true)}>
+              Chọn kênh chat
+            </button>
           </div>
         )}
       </section>

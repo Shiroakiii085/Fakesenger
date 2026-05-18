@@ -374,6 +374,81 @@ label {
   position: relative;
 }
 
+.notification-menu {
+  position: absolute;
+  top: 78px;
+  left: 18px;
+  right: 18px;
+  z-index: 8;
+  display: grid;
+  gap: 10px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 12px;
+  background: #fffdfa;
+  box-shadow: var(--shadow);
+}
+
+.notification-menu-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.notification-menu-header button {
+  border: 0;
+  background: transparent;
+  color: var(--mint-dark);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.notification-feed {
+  display: grid;
+  gap: 8px;
+  max-height: 280px;
+  overflow: auto;
+}
+
+.notification-feed button {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: start;
+  gap: 10px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 10px;
+  background: white;
+  color: var(--ink);
+  text-align: left;
+}
+
+.notification-feed button.unread {
+  border-color: rgba(47, 191, 143, 0.28);
+  background: rgba(47, 191, 143, 0.08);
+}
+
+.notification-feed span {
+  min-width: 0;
+}
+
+.notification-feed strong,
+.notification-feed small {
+  display: block;
+}
+
+.notification-feed small {
+  color: var(--muted);
+  line-height: 1.35;
+}
+
+.notification-feed p {
+  margin: 0;
+  color: var(--muted);
+}
+
 .profile-editor {
   display: grid;
   gap: 9px;
@@ -503,9 +578,26 @@ label {
 }
 
 .room-item {
+  position: relative;
   min-height: 58px;
   border-color: transparent;
   background: transparent;
+}
+
+.room-unread-badge {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  min-width: 20px;
+  height: 20px;
+  border-radius: 999px;
+  display: grid;
+  place-items: center;
+  padding: 0 6px;
+  background: var(--coral);
+  color: white;
+  font-size: 11px;
+  font-weight: 900;
 }
 
 .room-item.selected {
@@ -578,6 +670,10 @@ label {
 .empty-conversation p {
   margin: 0;
   line-height: 1.45;
+}
+
+.welcome-action {
+  margin-top: 8px;
 }
 
 .conversation {

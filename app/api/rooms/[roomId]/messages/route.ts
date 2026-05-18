@@ -74,34 +74,38 @@ export async function POST(request: Request, context: { params: Promise<{ roomId
 
     if (error) throw error;
 
-    // Process mentions
-    if (kind === "text" && message.includes("@")) {
-      const { data: roomMembers } = await supabase
-        .from("room_members")
-        .select("user_id, profiles!inner(display_name)")
-        .eq("room_id", roomId);
+    const { data: roomMembers, error: roomMembersError } = await supabase
+      .from("room_members")
+      .select("user_id, profiles!inner(display_name)")
+      .eq("room_id", roomId);
+    if (roomMembersError) throw roomMembersError;
 
-      if (roomMembers) {
-        const notifications = [];
-        for (const member of roomMembers) {
-          // Type casting since Supabase typings might not know profiles is an object here
-          const profile = member.profiles as { display_name?: string } | null;
-          const name = profile?.display_name;
-          if (name && member.user_id !== user.id && message.includes(`@${name}`)) {
-            notifications.push({
-              user_id: member.user_id,
-              actor_id: user.id,
-              room_id: roomId,
-              type: "mention",
-              message: `${(data.profiles as { display_name?: string } | null)?.display_name || "Ai đó"} đã nhắc đến bạn.`
-            });
-          }
-        }
-        if (notifications.length > 0) {
-          await supabase.from("notifications").insert(notifications);
-        }
-      }
+    const senderName = (data.profiles as { display_name?: string } | null)?.display_name || "Ai \u0111\u00f3";
+    const preview =
+      kind === "image"
+        ? `${senderName} \u0111\u00e3 g\u1eedi m\u1ed9t \u1ea3nh.`
+        : kind === "audio"
+          ? `${senderName} \u0111\u00e3 g\u1eedi m\u1ed9t tin nh\u1eafn tho\u1ea1i.`
+          : kind === "call"
+            ? `${senderName} \u0111\u00e3 b\u1eaft \u0111\u1ea7u m\u1ed9t cu\u1ed9c g\u1ecdi.`
+            : `${senderName}: ${message.slice(0, 120)}`;
 
+    const notifications = (roomMembers ?? [])
+      .filter((member) => member.user_id !== user.id)
+      .map((member) => {
+        const profile = member.profiles as { display_name?: string } | null;
+        const mentioned = kind === "text" && profile?.display_name && message.includes(`@${profile.display_name}`);
+        return {
+          user_id: member.user_id,
+          actor_id: user.id,
+          room_id: roomId,
+          type: mentioned ? "mention" : "message",
+          message: mentioned ? `${senderName} \u0111\u00e3 nh\u1eafc \u0111\u1ebfn b\u1ea1n.` : preview
+        };
+      });
+
+    if (notifications.length > 0) {
+      await supabase.from("notifications").insert(notifications);
     }
 
     return json({ message: data }, { status: 201 });

@@ -406,7 +406,7 @@ create table if not exists public.notifications (
   user_id uuid not null references public.profiles(id) on delete cascade,
   actor_id uuid references public.profiles(id) on delete set null,
   room_id uuid references public.rooms(id) on delete cascade,
-  type text not null check (type in ('mention', 'system')),
+  type text not null check (type in ('message', 'mention', 'system')),
   message text not null,
   is_read boolean not null default false,
   created_at timestamptz not null default now()

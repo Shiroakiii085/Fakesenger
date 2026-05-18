@@ -11,20 +11,29 @@ export async function GET(request: Request) {
       return json({ rooms: [] });
     }
 
-    const [roomsResult, membersResult] = await Promise.all([
+    const [roomsResult, membersResult, unreadResult] = await Promise.all([
       supabase.from("rooms").select("*").in("id", roomIds).order("updated_at", { ascending: false }),
       supabase
         .from("room_members")
         .select("room_id,user_id,role,profiles:profiles(id,email,display_name,avatar_url,status)")
-        .in("room_id", roomIds)
+        .in("room_id", roomIds),
+      supabase.from("notifications").select("room_id").eq("user_id", user.id).eq("is_read", false).in("room_id", roomIds)
     ]);
 
     if (roomsResult.error) throw roomsResult.error;
     if (membersResult.error) throw membersResult.error;
+    if (unreadResult.error) throw unreadResult.error;
+
+    const unreadCounts = new Map<string, number>();
+    for (const notification of unreadResult.data ?? []) {
+      if (!notification.room_id) continue;
+      unreadCounts.set(notification.room_id, (unreadCounts.get(notification.room_id) ?? 0) + 1);
+    }
 
     const rooms = (roomsResult.data ?? []).map((room) => ({
       ...room,
-      members: (membersResult.data ?? []).filter((member) => member.room_id === room.id)
+      members: (membersResult.data ?? []).filter((member) => member.room_id === room.id),
+      unread_count: unreadCounts.get(room.id) ?? 0
     }));
 
     return json({ rooms });
