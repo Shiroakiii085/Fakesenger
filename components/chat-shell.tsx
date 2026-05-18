@@ -48,7 +48,6 @@ type AiChatMessage = {
   }>;
 };
 
-const DEFAULT_AI_MODEL = "openai/gpt-oss-120b:free";
 
 
 class AuthExpiredError extends Error {
@@ -319,7 +318,6 @@ export function ChatShell() {
   const [aiMessages, setAiMessages] = useState<AiChatMessage[]>([]);
   const [aiDraft, setAiDraft] = useState("");
   const [isAiSending, setIsAiSending] = useState(false);
-  const [aiModelUsed, setAiModelUsed] = useState(DEFAULT_AI_MODEL);
   const [openMessageMenuId, setOpenMessageMenuId] = useState<string | null>(null);
   const [messageMenuDirection, setMessageMenuDirection] = useState<"up" | "down">("down");
   const [editingMessageId, setEditingMessageId] = useState<string | null>(null);
@@ -560,7 +558,6 @@ export function ChatShell() {
         setAiMessages([]);
         setAiDraft("");
         setIsAiChatOpen(false);
-        setAiModelUsed(DEFAULT_AI_MODEL);
         setActiveRoomId(null);
         setIsAccountMenuOpen(false);
         setIsAuthLoading(false);
@@ -902,7 +899,6 @@ export function ChatShell() {
         setAiMessages([]);
         setAiDraft("");
         setIsAiChatOpen(false);
-        setAiModelUsed(DEFAULT_AI_MODEL);
         setActiveRoomId(null);
         setAuthMode("login");
         setPassword("");
@@ -1071,7 +1067,6 @@ export function ChatShell() {
             : message
         )
       );
-      setAiModelUsed(data.model);
     } catch (error) {
       setAiMessages((current) => current.filter((message) => message.id !== pendingMessage.id));
       setAiDraft(content);
@@ -1756,8 +1751,7 @@ export function ChatShell() {
               <Sparkles size={17} />
             </span>
             <span className="room-meta">
-              <strong>Trợ lý AI</strong>
-              <small>gpt-oss-120b + web search khi cần</small>
+              <strong>Trợ lý ảo</strong>
             </span>
           </button>
 
@@ -1806,11 +1800,9 @@ export function ChatShell() {
                   <Sparkles size={18} />
                 </span>
                 <div>
-                  <h2>Trợ lý AI</h2>
-                  <p>Model hiện dùng: {aiModelUsed}</p>
+                  <h2>Trợ lý ảo</h2>
                 </div>
               </div>
-              <span className="role-badge ai-badge">OpenRouter</span>
             </header>
 
             <div className="messages" ref={messagesRef} onScroll={handleMessagesScroll}>
@@ -1824,7 +1816,7 @@ export function ChatShell() {
                       </span>
                     )}
                     <div className={`bubble ${!mine ? "ai-bubble" : ""}`}>
-                      {!mine && <strong>Trợ lý AI</strong>}
+                      {!mine && <strong>Trợ lý ảo</strong>}
                       <p>{message.content}</p>
                       {!mine && message.sources && message.sources.length > 0 && (
                         <div className="ai-sources">
@@ -1845,7 +1837,7 @@ export function ChatShell() {
                 <div className="empty-conversation ai-empty-state">
                   <Sparkles size={34} />
                   <h3>Hỏi bất cứ điều gì</h3>
-                  <p>Trợ lý AI sẵn sàng giải thích, gợi ý và giúp bạn suy nghĩ nhanh hơn.</p>
+                  <p>Trợ lý ảo sẵn sàng giải thích, gợi ý và giúp bạn suy nghĩ nhanh hơn.</p>
                 </div>
               )}
               <div ref={messagesEndRef} />
@@ -1855,7 +1847,7 @@ export function ChatShell() {
               <input
                 value={aiDraft}
                 onChange={(event) => setAiDraft(event.target.value)}
-                placeholder="Hỏi trợ lý AI..."
+                placeholder="Hỏi trợ lý ảo..."
                 disabled={isAiSending}
               />
               <button className="send-button" type="submit" disabled={!aiDraft.trim() || isAiSending} title="Gửi">

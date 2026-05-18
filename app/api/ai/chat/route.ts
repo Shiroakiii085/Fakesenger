@@ -30,7 +30,7 @@ type OpenRouterResponse = {
 
 const DEFAULT_MODEL = process.env.OPENROUTER_MODEL || "openai/gpt-oss-120b:free";
 const SYSTEM_PROMPT =
-  "Bạn là trợ lý AI trong ứng dụng chat Fakesenger. Trả lời bằng tiếng Việt rõ ràng, hữu ích, ngắn gọn khi có thể, và lịch sự. Nếu người dùng hỏi bằng ngôn ngữ khác, hãy trả lời theo ngôn ngữ đó. Khi câu hỏi phụ thuộc vào thông tin mới, thay đổi theo thời gian, hoặc cần kiểm chứng trên Internet, hãy chủ động dùng web search trước khi trả lời.";
+  "Bạn là trợ lý AI trong ứng dụng chat Fakesenger. Trả lời bằng tiếng Việt rõ ràng, hữu ích, lịch sự. Mặc định trả lời ngắn gọn trong 2-4 câu hoặc dưới 180 từ, chỉ chi tiết hơn khi người dùng yêu cầu. Nếu người dùng hỏi bằng ngôn ngữ khác, hãy trả lời theo ngôn ngữ đó. Khi câu hỏi phụ thuộc vào thông tin mới, thay đổi theo thời gian, hoặc cần kiểm chứng trên Internet, hãy chủ động dùng web search trước khi trả lời nhưng chỉ lấy những nguồn thật sự cần thiết.";
 
 function requiredEnv(name: string) {
   const value = process.env[name];
@@ -44,7 +44,7 @@ function normalizeMessages(messages: unknown): Array<{ role: ChatRole; content: 
   if (!Array.isArray(messages)) return [];
 
   return messages
-    .slice(-20)
+    .slice(-12)
     .map((item) => item as IncomingMessage)
     .filter((item): item is IncomingMessage & { role: ChatRole; content: string } => {
       return (
@@ -55,7 +55,7 @@ function normalizeMessages(messages: unknown): Array<{ role: ChatRole; content: 
     })
     .map((item) => ({
       role: item.role,
-      content: item.content.trim().slice(0, 4000)
+      content: item.content.trim().slice(0, 2500)
     }));
 }
 
@@ -73,7 +73,7 @@ function extractSources(annotations?: OpenRouterAnnotation[]) {
       seen.add(source.url);
       return true;
     })
-    .slice(0, 5);
+    .slice(0, 3);
 }
 
 export async function POST(request: Request) {
@@ -101,14 +101,14 @@ export async function POST(request: Request) {
           {
             type: "openrouter:web_search",
             parameters: {
-              max_results: 5,
-              max_total_results: 10,
-              search_context_size: "medium"
+              max_results: 3,
+              max_total_results: 4,
+              search_context_size: "low"
             }
           }
         ],
-        temperature: 0.7,
-        max_tokens: 900
+        temperature: 0.5,
+        max_completion_tokens: 420
       })
     });
 
